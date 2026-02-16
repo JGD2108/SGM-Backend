@@ -13,24 +13,54 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { ApiBearerAuth, ApiConsumes, ApiTags } from '@nestjs/swagger';
+import { diskStorage } from 'multer';
+import { randomUUID } from 'crypto';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import type { Response } from 'express';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { JwtAuthGuard } from '../common/guards/jwt.guard';
 import { TramitesService } from './tramites.service';
+import { CancelDto } from './dto/cancel.dto';
+import { ChangeEstadoDto } from './dto/change-estado.dto';
 import { CreateTramiteDto } from './dto/create-tramite.dto';
 import { PatchTramiteDto } from './dto/patch-tramite.dto';
-import { ChangeEstadoDto } from './dto/change-estado.dto';
-import { CancelDto } from './dto/cancel.dto';
 import { ReabrirDto } from './dto/reabrir.dto';
 import { UploadTramiteFileDto } from './dto/upload-tramite-file.dto';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { memoryStorage } from 'multer';
-import type { Response } from 'express';
+
+const TMP_UPLOAD_DIR = path.join(os.tmpdir(), 'sgm-uploads');
+
+function maxUploadBytes() {
+  const raw = Number(process.env.MAX_UPLOAD_MB ?? 20);
+  const mb = Number.isFinite(raw) ? raw : 20;
+  return mb * 1024 * 1024;
+}
+
+function pdfUploadOptions() {
+  return {
+    storage: diskStorage({
+      destination: (_req, _file, cb) => {
+        fs.mkdirSync(TMP_UPLOAD_DIR, { recursive: true });
+        cb(null, TMP_UPLOAD_DIR);
+      },
+      filename: (_req, _file, cb) => {
+        cb(null, `${Date.now()}-${randomUUID()}.pdf`);
+      },
+    }),
+    limits: { fileSize: maxUploadBytes() },
+    fileFilter: (_req: any, file: Express.Multer.File, cb: any) => {
+      cb(null, file.mimetype === 'application/pdf');
+    },
+  };
+}
 
 @ApiTags('Tramites')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller('tramites')
 export class TramitesController {
-  constructor(private readonly service: TramitesService) { }
+  constructor(private readonly service: TramitesService) {}
 
   @Get()
   async list(@Query() query: any) {
@@ -39,12 +69,7 @@ export class TramitesController {
 
   @Post()
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(
-    FileInterceptor('factura', {
-      storage: memoryStorage(),
-      limits: { fileSize: Number(process.env.MAX_UPLOAD_MB ?? 20) * 1024 * 1024 },
-    }),
-  )
+  @UseInterceptors(FileInterceptor('factura', pdfUploadOptions()))
   async create(
     @Body() dto: CreateTramiteDto,
     @UploadedFile() factura: Express.Multer.File,
@@ -68,7 +93,6 @@ export class TramitesController {
     return this.service.patch(id, dto, req.user.id);
   }
 
-  // Historial de estados
   @Get(':id/estados/historial')
   async historial(@Param('id') id: string) {
     return this.service.historial(id);
@@ -78,7 +102,6 @@ export class TramitesController {
   async changeEstado(@Param('id') id: string, @Body() dto: ChangeEstadoDto, @Req() req: any) {
     return this.service.changeEstado(id, dto.toEstado as any, dto.notes, req.user.id, dto.placa);
   }
-
 
   @Post(':id/finalizar')
   async finalizar(@Param('id') id: string, @Req() req: any) {
@@ -95,13 +118,11 @@ export class TramitesController {
     return this.service.reabrir(id, dto.reason, (dto.toEstado as any) ?? undefined, req.user.id);
   }
 
-  // Checklist
   @Get(':id/checklist')
   async checklist(@Param('id') id: string) {
     return this.service.checklist(id);
   }
 
-  // Files del trámite
   @Get(':id/files')
   async listFiles(@Param('id') id: string) {
     return this.service.listFiles(id);
@@ -109,12 +130,7 @@ export class TramitesController {
 
   @Post(':id/files')
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(
-    FileInterceptor('file', {
-      storage: memoryStorage(),
-      limits: { fileSize: Number(process.env.MAX_UPLOAD_MB ?? 20) * 1024 * 1024 },
-    }),
-  )
+  @UseInterceptors(FileInterceptor('file', pdfUploadOptions()))
   async uploadFile(
     @Param('id') id: string,
     @Body() dto: UploadTramiteFileDto,

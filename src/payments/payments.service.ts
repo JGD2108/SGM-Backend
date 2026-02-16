@@ -17,8 +17,11 @@ export class PaymentsService {
   }
 
   private parseFecha(s: string): Date {
-    if (s.includes('T')) return new Date(s);
-    return new Date(`${s}T00:00:00.000Z`);
+    const date = s.includes('T') ? new Date(s) : new Date(`${s}T00:00:00.000Z`);
+    if (Number.isNaN(date.getTime())) {
+      throw new AppError('VALIDATION_ERROR', 'Fecha de pago invalida.', { fecha: s }, 400);
+    }
+    return date;
   }
 
   async list(tramiteId: string) {

@@ -1,9 +1,18 @@
 import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { JwtAuthGuard } from '../common/guards/jwt.guard';
-import { ReportsService } from './reports.service';
-import { ReportsQueryDto } from './dto/reports-query.dto';
 import type { Response } from 'express';
+import { JwtAuthGuard } from '../common/guards/jwt.guard';
+import { ReportsQueryDto } from './dto/reports-query.dto';
+import { ReportsService } from './reports.service';
+
+function sanitizeCsvCell(value: unknown): string {
+  const s = String(value ?? '');
+  const t = s.trimStart();
+  if (t.startsWith('=') || t.startsWith('+') || t.startsWith('-') || t.startsWith('@')) {
+    return `'${s}`;
+  }
+  return s;
+}
 
 @ApiTags('Reports')
 @ApiBearerAuth()
@@ -26,30 +35,37 @@ export class ReportsController {
   async exportCsv(@Query() q: ReportsQueryDto, @Res() res: Response) {
     const data = await this.service.tramites({ ...q, page: 1, pageSize: 200 });
 
-    // CSV simple (MVP)
     const headers = [
-      'display_id','estado_actual','placa','concesionario_code','consecutivo',
-      'cliente_doc','cliente_nombre','ciudad','created_at',
-      'total_pagos','total_envios','total_empresa'
+      'display_id',
+      'estado_actual',
+      'placa',
+      'concesionario_code',
+      'consecutivo',
+      'cliente_doc',
+      'cliente_nombre',
+      'ciudad',
+      'created_at',
+      'total_pagos',
+      'total_envios',
+      'total_empresa',
     ];
 
     const lines = [headers.join(',')];
-
     for (const it of data.items) {
       const row = [
-        it.display_id,
-        it.estado_actual,
-        it.placa ?? '',
-        it.concesionario_code,
-        String(it.consecutivo),
-        it.cliente_doc,
-        it.cliente_nombre,
-        it.ciudad_nombre,
-        it.created_at,
-        String(it.total_pagos),
-        String(it.total_envios),
-        String(it.total_empresa),
-      ].map(v => `"${String(v).replace(/"/g, '""')}"`);
+        sanitizeCsvCell(it.display_id),
+        sanitizeCsvCell(it.estado_actual),
+        sanitizeCsvCell(it.placa ?? ''),
+        sanitizeCsvCell(it.concesionario_code),
+        sanitizeCsvCell(String(it.consecutivo)),
+        sanitizeCsvCell(it.cliente_doc),
+        sanitizeCsvCell(it.cliente_nombre),
+        sanitizeCsvCell(it.ciudad_nombre),
+        sanitizeCsvCell(it.created_at),
+        sanitizeCsvCell(String(it.total_pagos)),
+        sanitizeCsvCell(String(it.total_envios)),
+        sanitizeCsvCell(String(it.total_empresa)),
+      ].map((v) => `"${String(v).replace(/"/g, '""')}"`);
 
       lines.push(row.join(','));
     }

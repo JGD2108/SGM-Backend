@@ -4,6 +4,7 @@ import { ConfigService } from '@nestjs/config';
 import { StorageService } from '../storage/storage.service';
 import { AppError } from '../common/errors/app-error';
 import { countPdfPages } from '../common/pdf/pdf.utils';
+import { readFile, unlink } from 'fs/promises';
 import { CreateTramiteDto } from './dto/create-tramite.dto';
 import { PatchTramiteDto } from './dto/patch-tramite.dto';
 import { UploadTramiteFileDto } from './dto/upload-tramite-file.dto';
@@ -116,6 +117,20 @@ export class TramitesService {
   }
 
   // ✅ Reserva el menor libre. Si hay choque, reintenta.
+  private async getUploadBuffer(file: Express.Multer.File | undefined, field: string): Promise<Buffer> {
+    if (!file) {
+      throw new AppError('VALIDATION_ERROR', 'Archivo PDF obligatorio.', { field }, 400);
+    }
+    if (file.buffer) return file.buffer;
+    if (file.path) return readFile(file.path);
+    throw new AppError('VALIDATION_ERROR', 'No se pudo leer el archivo cargado.', { field }, 400);
+  }
+
+  private async cleanupTempUpload(file?: Express.Multer.File) {
+    if (!file?.path) return;
+    await unlink(file.path).catch(() => undefined);
+  }
+
   private async reserveNextConsecutivo(concesionarioId: string, year: number) {
     const maxRetries = 6;
 
@@ -157,7 +172,7 @@ export class TramitesService {
   // POST /tramites (multipart)
   // ==========================
   async createWithFactura(dto: CreateTramiteDto, facturaFile: Express.Multer.File, userId: string) {
-    if (!facturaFile?.buffer) {
+    if (!facturaFile) {
       throw new AppError('VALIDATION_ERROR', 'La factura (PDF) es obligatoria.', { field: 'factura' }, 400);
     }
     if (facturaFile.mimetype !== 'application/pdf') {
@@ -167,7 +182,8 @@ export class TramitesService {
       throw new AppError('UPLOAD_TOO_LARGE', 'Archivo demasiado grande.', {}, 413);
     }
 
-    const pageCount = await this.validatePdfOrThrow(facturaFile.buffer);
+    const facturaBuffer = await this.getUploadBuffer(facturaFile, 'factura');
+    const pageCount = await this.validatePdfOrThrow(facturaBuffer);
 
     // catálogos
     const concesionario = await this.prisma.concesionario.findUnique({
@@ -193,7 +209,7 @@ export class TramitesService {
     const storagePath = this.storage.buildRelativePath(year, concesionario.code, consecutivo, filename);
 
     try {
-      await this.storage.writeFile(storagePath, facturaFile.buffer);
+      await this.storage.writeFile(storagePath, facturaBuffer);
 
       // 3) Crear trámite + checklist + file record + historial y amarrar reserva
       const result = await this.prisma.$transaction(async (tx) => {
@@ -300,6 +316,8 @@ export class TramitesService {
         data: { status: 'LIBERADO', releasedAt: new Date(), tramiteId: null },
       });
       throw e;
+    } finally {
+      await this.cleanupTempUpload(facturaFile);
     }
   }
 
@@ -813,7 +831,7 @@ export class TramitesService {
   }
 
   async uploadFile(tramiteId: string, dto: UploadTramiteFileDto, file: Express.Multer.File, userId: string) {
-    if (!file?.buffer) {
+    if (!file) {
       throw new AppError('VALIDATION_ERROR', 'Archivo PDF obligatorio.', { field: 'file' }, 400);
     }
     if (file.mimetype !== 'application/pdf') {
@@ -833,7 +851,8 @@ export class TramitesService {
     const docType = await this.prisma.documentType.findUnique({ where: { key: dto.docKey } });
     if (!docType) throw new AppError('VALIDATION_ERROR', 'docKey inválido.', { docKey: dto.docKey }, 400);
 
-    const pageCount = await this.validatePdfOrThrow(file.buffer);
+    const fileBuffer = await this.getUploadBuffer(file, 'file');
+    const pageCount = await this.validatePdfOrThrow(fileBuffer);
 
     const last = await this.prisma.tramiteFile.findFirst({
       where: { tramiteId, docKey: dto.docKey },
@@ -851,7 +870,7 @@ export class TramitesService {
     );
 
     try {
-      await this.storage.writeFile(storagePath, file.buffer);
+      await this.storage.writeFile(storagePath, fileBuffer);
 
       const created = await this.prisma.$transaction(async (tx) => {
         const f = await tx.tramiteFile.create({
@@ -889,6 +908,8 @@ export class TramitesService {
     } catch (e) {
       await this.storage.deleteFileIfExists(storagePath);
       throw e;
+    } finally {
+      await this.cleanupTempUpload(file);
     }
   }
 

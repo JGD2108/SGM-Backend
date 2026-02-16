@@ -1,9 +1,11 @@
-import { Controller, Get } from '@nestjs/common';
+import { Controller, Get, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../common/guards/jwt.guard';
 import { CatalogsService } from './catalogs.service';
 
 @ApiTags('Catalogs')
-@ApiBearerAuth() // (aún no protegemos, pero Swagger quedará listo)
+@ApiBearerAuth()
+@UseGuards(JwtAuthGuard)
 @Controller('catalogs')
 export class CatalogsController {
   constructor(private readonly service: CatalogsService) {}
