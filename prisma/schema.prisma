@@ -1,0 +1,373 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ServicioTipo {
+  MATRICULA
+  TRASPASO
+  PRENDA_INSCRIPCION
+  PRENDA_LEVANTAMIENTO
+  PRENDA_MODIFICACION
+  DUPLICADO_LICENCIA_TRANSITO
+  DUPLICADO_PLACAS
+  CAMBIO_COLOR
+  CAMBIO_MOTOR
+  CAMBIO_SERVICIO
+  CANCELACION_MATRICULA
+  TRASLADO_CUENTA
+  OTRO
+}
+
+enum ServicioEstado {
+  RECIBIDO
+  EN_REVISION
+  PENDIENTE_DOCUMENTOS
+  PENDIENTE_PAGOS
+  RADICADO
+  EN_TRAMITE
+  LISTO_PARA_ENTREGA
+  ENTREGADO
+  CANCELADO
+}
+
+enum TramiteEstado {
+  FACTURA_RECIBIDA
+  PREASIGNACION_SOLICITADA
+  PLACA_ASIGNADA
+  PLACA_ENVIADA_CONCESIONARIO
+  DOCS_FISICOS_PENDIENTES
+  DOCS_FISICOS_COMPLETOS
+  ENVIADO_GESTOR_TRANSITO
+  TIMBRE_PAGADO
+  DERECHOS_PAGADOS
+  FINALIZADO_ENTREGADO
+  CANCELADO
+}
+
+enum ActionType {
+  NORMAL
+  REABRIR
+  CANCELAR
+  FINALIZAR
+}
+
+enum ChecklistStatus {
+  PENDIENTE
+  RECIBIDO
+}
+
+enum ConsecStatus {
+  RESERVADO
+  LIBERADO
+}
+
+enum PaymentTipo {
+  TIMBRE
+  DERECHOS
+  OTRO
+}
+
+enum MedioPago {
+  EFECTIVO
+  TRANSFERENCIA
+  TARJETA
+  CONSIGNACION
+  OTRO
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  passwordHash String
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+
+  estadoHist TramiteEstadoHist[]
+  files      TramiteFile[]
+  payments   Payment[]
+
+  // NUEVO
+  createdTramites    Tramite[]            @relation("TramiteCreatedBy")
+  servicioPagos      ServicioPago[]
+  servicioEstadoHist ServicioEstadoHist[]
+}
+
+model Concesionario {
+  id   String @id @default(cuid())
+  code String @unique
+  name String
+
+  tramites             Tramite[]
+  tramitesComoAnterior Tramite[] @relation("ConcesionarioAnterior")
+
+  consec ConsecutivoReserva[]
+}
+
+model Ciudad {
+  id   String @id @default(cuid())
+  name String @unique
+
+  tramites Tramite[]
+}
+
+model DocumentType {
+  id       String  @id @default(cuid())
+  key      String  @unique
+  name     String
+  required Boolean @default(false)
+  isActive Boolean @default(true)
+
+  checklistItems TramiteDocument[]
+  files          TramiteFile[]
+}
+
+model Cliente {
+  id     String @id @default(cuid())
+  nombre String
+  doc    String
+
+  tramites Tramite[]
+
+  @@index([doc])
+}
+
+model Tramite {
+  id String @id @default(cuid())
+
+  year Int
+
+  concesionarioId String
+  concesionario   Concesionario @relation(fields: [concesionarioId], references: [id])
+
+  concesionarioCodeSnapshot String
+
+  concesionarioAnteriorId String?
+  concesionarioAnterior   Concesionario? @relation("ConcesionarioAnterior", fields: [concesionarioAnteriorId], references: [id])
+
+  consecutivo         Int
+  consecutivoAnterior Int?
+
+  ciudadId String
+  ciudad   Ciudad @relation(fields: [ciudadId], references: [id])
+
+  clienteId String
+  cliente   Cliente @relation(fields: [clienteId], references: [id])
+
+  // MATRÍCULAS
+  placa        String?
+  estadoActual TramiteEstado @default(FACTURA_RECIBIDA)
+
+  honorariosValor Decimal? @db.Decimal(14, 2)
+
+  // NUEVO: multi-servicios
+  tipoServicio   ServicioTipo    @default(MATRICULA)
+  estadoServicio ServicioEstado?
+  serviceData    Json?
+
+  // Auditoría simple
+  createdById String?
+  createdBy   User?   @relation("TramiteCreatedBy", fields: [createdById], references: [id])
+
+  gestorNombre   String?
+  gestorTelefono String?
+
+  radicadoAt DateTime?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  finalizedAt DateTime?
+  canceledAt  DateTime?
+
+  estadoHist    TramiteEstadoHist[]
+  checklist     TramiteDocument[]
+  files         TramiteFile[]
+  payments      Payment[]
+  shipmentLinks ShipmentTramite[]
+
+  // NUEVO: pagos simples para servicios no-matrícula
+  servicioPagos      ServicioPago[]
+  servicioEstadoHist ServicioEstadoHist[]
+
+  reservaConsecutivo ConsecutivoReserva[]
+
+  @@index([year])
+  @@index([concesionarioId, year])
+  @@index([estadoActual])
+  @@index([tipoServicio])
+  @@index([estadoServicio])
+}
+
+model TramiteEstadoHist {
+  id        String  @id @default(cuid())
+  tramiteId String
+  tramite   Tramite @relation(fields: [tramiteId], references: [id], onDelete: Cascade)
+
+  fromEstado TramiteEstado?
+  toEstado   TramiteEstado
+
+  changedById String
+  changedBy   User   @relation(fields: [changedById], references: [id])
+
+  changedAt  DateTime   @default(now())
+  notes      String?
+  actionType ActionType @default(NORMAL)
+
+  @@index([tramiteId, changedAt])
+}
+
+model ServicioEstadoHist {
+  id        String  @id @default(cuid())
+  tramiteId String
+  tramite   Tramite @relation(fields: [tramiteId], references: [id], onDelete: Cascade)
+
+  fromEstadoServicio ServicioEstado?
+  toEstadoServicio   ServicioEstado
+
+  changedById String
+  changedBy   User   @relation(fields: [changedById], references: [id])
+
+  changedAt  DateTime   @default(now())
+  notes      String?
+  actionType ActionType @default(NORMAL)
+
+  @@index([tramiteId, changedAt])
+}
+
+model ServicioPago {
+  id        String  @id @default(cuid())
+  tramiteId String
+  tramite   Tramite @relation(fields: [tramiteId], references: [id], onDelete: Cascade)
+
+  concepto String
+  valor    Int
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([tramiteId])
+}
+
+model TramiteDocument {
+  id        String  @id @default(cuid())
+  tramiteId String
+  tramite   Tramite @relation(fields: [tramiteId], references: [id], onDelete: Cascade)
+
+  documentTypeId String?
+  documentType   DocumentType? @relation(fields: [documentTypeId], references: [id])
+
+  docKey       String
+  nameSnapshot String
+  required     Boolean
+
+  status     ChecklistStatus @default(PENDIENTE)
+  receivedAt DateTime?
+
+  @@unique([tramiteId, docKey])
+  @@index([tramiteId])
+}
+
+model TramiteFile {
+  id        String  @id @default(cuid())
+  tramiteId String
+  tramite   Tramite @relation(fields: [tramiteId], references: [id], onDelete: Cascade)
+
+  documentTypeId String?
+  documentType   DocumentType? @relation(fields: [documentTypeId], references: [id])
+
+  docKey           String
+  filenameOriginal String
+  storagePath      String
+  pageCount        Int
+  version          Int
+
+  uploadedById String
+  uploadedBy   User   @relation(fields: [uploadedById], references: [id])
+
+  uploadedAt DateTime @default(now())
+
+  @@unique([tramiteId, docKey, version])
+  @@index([tramiteId, docKey])
+}
+
+model Payment {
+  id        String  @id @default(cuid())
+  tramiteId String
+  tramite   Tramite @relation(fields: [tramiteId], references: [id], onDelete: Cascade)
+
+  tipo      PaymentTipo
+  valor     Int
+  fecha     DateTime
+  medioPago MedioPago
+  notes     String?
+
+  createdById String
+  createdBy   User   @relation(fields: [createdById], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([tramiteId, tipo])
+}
+
+model Shipment {
+  id             String   @id @default(cuid())
+  numeroGuia     String
+  transportadora String
+  costo          Int
+  fechaEnvio     DateTime
+  notes          String?
+
+  createdAt DateTime @default(now())
+
+  links ShipmentTramite[]
+
+  @@index([numeroGuia])
+}
+
+model ShipmentTramite {
+  id         String   @id @default(cuid())
+  shipmentId String
+  shipment   Shipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+
+  tramiteId String
+  tramite   Tramite @relation(fields: [tramiteId], references: [id], onDelete: Cascade)
+
+  @@unique([shipmentId, tramiteId])
+  @@index([tramiteId])
+}
+
+model ConsecutivoReserva {
+  id              String        @id @default(cuid())
+  concesionarioId String
+  concesionario   Concesionario @relation(fields: [concesionarioId], references: [id], onDelete: Cascade)
+
+  year        Int
+  consecutivo Int
+
+  tramiteId String?
+  tramite   Tramite? @relation(fields: [tramiteId], references: [id])
+
+  status     ConsecStatus @default(RESERVADO)
+  reservedAt DateTime     @default(now())
+  releasedAt DateTime?
+
+  @@index([concesionarioId, year, status])
+  @@index([tramiteId])
+}
+
+model AlertRule {
+  id            String        @id @default(cuid())
+  fromEstado    TramiteEstado
+  toEstado      TramiteEstado
+  thresholdDays Int
+  isActive      Boolean       @default(true)
+  name          String        @unique
+
+  @@index([isActive])
+}

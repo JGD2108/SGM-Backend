@@ -1,0 +1,16 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: sgm_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: sgm_app
+      POSTGRES_PASSWORD: sgm_pass
+      POSTGRES_DB: sgm
+    ports:
+      - "5432:5432"
+    volumes:
+      - sgm_pgdata:/var/lib/postgresql/data
+
+volumes:
+  sgm_pgdata:
