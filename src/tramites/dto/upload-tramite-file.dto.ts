@@ -1,8 +1,8 @@
-import { IsNotEmpty, IsOptional, IsString } from 'class-validator';
+import { IsOptional, IsString } from 'class-validator';
 
 export class UploadTramiteFileDto {
-  @IsString() @IsNotEmpty()
-  docKey: string; // FACTURA, EVIDENCIA_PLACA, OTRO, etc.
+  @IsString() @IsOptional()
+  docKey?: string;
 
   @IsString() @IsOptional()
   documentTypeId?: string;

@@ -121,8 +121,10 @@ export class TramitesService {
     return p.trim().toUpperCase();
   }
 
-  private normalizeDocKey(docKey: string) {
-    return docKey.trim().toUpperCase();
+  private normalizeDocKey(docKey?: string) {
+    const normalized = docKey?.trim().toUpperCase();
+    if (!normalized) return undefined;
+    return normalized;
   }
 
   private isPdfMimeType(mimetype: string) {
@@ -162,11 +164,13 @@ export class TramitesService {
     return 1;
   }
 
-  private async resolveDocType(docKey: string) {
+  private async resolveDocType(docKey?: string) {
     const normalizedDocKey = this.normalizeDocKey(docKey);
-    const requestedType = await this.prisma.documentType.findUnique({ where: { key: normalizedDocKey } });
-    if (requestedType) {
-      return { requestedDocKey: normalizedDocKey, docKey: normalizedDocKey, docType: requestedType };
+    if (normalizedDocKey) {
+      const requestedType = await this.prisma.documentType.findUnique({ where: { key: normalizedDocKey } });
+      if (requestedType) {
+        return { requestedDocKey: normalizedDocKey, docKey: normalizedDocKey, docType: requestedType };
+      }
     }
 
     const fallbackType = await this.prisma.documentType.findUnique({ where: { key: 'OTRO' } });
@@ -174,7 +178,7 @@ export class TramitesService {
       throw new AppError(
         'MISSING_DOCUMENT_TYPE',
         'No existe el tipo de documento OTRO en catálogos.',
-        { requestedDocKey: normalizedDocKey },
+        { requestedDocKey: normalizedDocKey ?? null },
         500,
       );
     }
