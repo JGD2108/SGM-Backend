@@ -38,6 +38,10 @@ const MIME_EXTENSION_MAP: Record<string, string> = {
   'image/png': 'png',
   'image/webp': 'webp',
 };
+const FLEXIBLE_DOC_KEYS = ['OTRO', 'DOCS_FISICOS', 'DOC_FISICO'] as const;
+const FLEXIBLE_DOC_KEY_SET = new Set<string>(FLEXIBLE_DOC_KEYS);
+const FLEXIBLE_DOC_TYPE_PREFERENCE = ['OTRO', 'DOC_FISICO', 'DOCS_FISICOS'] as const;
+const FALLBACK_FLEXIBLE_NAME = 'Otros documentos';
 
 @Injectable()
 export class TramitesService {
@@ -127,6 +131,69 @@ export class TramitesService {
     return normalized;
   }
 
+  private isFlexibleDocKey(docKey?: string) {
+    return !!docKey && FLEXIBLE_DOC_KEY_SET.has(docKey);
+  }
+
+  private async findPreferredFlexibleDocType() {
+    for (const key of FLEXIBLE_DOC_TYPE_PREFERENCE) {
+      const docType = await this.prisma.documentType.findUnique({ where: { key } });
+      if (docType) return docType;
+    }
+    return null;
+  }
+
+  private async ensureFlexibleChecklistItem(tramiteId: string) {
+    const existingFlexibleItem = await this.prisma.tramiteDocument.findFirst({
+      where: {
+        tramiteId,
+        docKey: { in: [...FLEXIBLE_DOC_KEYS] },
+      },
+      select: { id: true },
+    });
+    if (existingFlexibleItem) return;
+
+    const preferredType = await this.findPreferredFlexibleDocType();
+    const docKey = preferredType && this.isFlexibleDocKey(preferredType.key) ? preferredType.key : 'OTRO';
+
+    await this.prisma.tramiteDocument.upsert({
+      where: { tramiteId_docKey: { tramiteId, docKey } },
+      update: {},
+      create: {
+        tramiteId,
+        documentTypeId: preferredType?.id ?? null,
+        docKey,
+        nameSnapshot: preferredType?.name ?? FALLBACK_FLEXIBLE_NAME,
+        required: false,
+        status: 'PENDIENTE',
+        receivedAt: null,
+      },
+    });
+  }
+
+  private async ensureChecklistItemForDocKey(
+    tx: Prisma.TransactionClient,
+    tramiteId: string,
+    docKey: string,
+    docType: { id: string; name: string; required: boolean },
+  ) {
+    const isFlexible = this.isFlexibleDocKey(docKey);
+
+    await tx.tramiteDocument.upsert({
+      where: { tramiteId_docKey: { tramiteId, docKey } },
+      update: {},
+      create: {
+        tramiteId,
+        documentTypeId: docType.id,
+        docKey,
+        nameSnapshot: isFlexible ? FALLBACK_FLEXIBLE_NAME : docType.name,
+        required: isFlexible ? false : docType.required,
+        status: 'PENDIENTE',
+        receivedAt: null,
+      },
+    });
+  }
+
   private isPdfMimeType(mimetype: string) {
     return mimetype === 'application/pdf';
   }
@@ -171,13 +238,26 @@ export class TramitesService {
       if (requestedType) {
         return { requestedDocKey: normalizedDocKey, docKey: normalizedDocKey, docType: requestedType };
       }
+
+      if (this.isFlexibleDocKey(normalizedDocKey)) {
+        const preferredFlexibleType = await this.findPreferredFlexibleDocType();
+        if (!preferredFlexibleType) {
+          throw new AppError(
+            'MISSING_DOCUMENT_TYPE',
+            'No existe un tipo de documento flexible (OTRO/DOC_FISICO) en catalogos.',
+            { requestedDocKey: normalizedDocKey },
+            500,
+          );
+        }
+        return { requestedDocKey: normalizedDocKey, docKey: normalizedDocKey, docType: preferredFlexibleType };
+      }
     }
 
-    const fallbackType = await this.prisma.documentType.findUnique({ where: { key: 'OTRO' } });
+    const fallbackType = await this.findPreferredFlexibleDocType();
     if (!fallbackType) {
       throw new AppError(
         'MISSING_DOCUMENT_TYPE',
-        'No existe el tipo de documento OTRO en catálogos.',
+        'No existe un tipo de documento flexible (OTRO/DOC_FISICO) en catalogos.',
         { requestedDocKey: normalizedDocKey ?? null },
         500,
       );
@@ -869,6 +949,7 @@ export class TramitesService {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
     if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
+    await this.ensureFlexibleChecklistItem(id);
 
     const rows = await this.prisma.tramiteDocument.findMany({
       where: { tramiteId: id },
@@ -878,6 +959,7 @@ export class TramitesService {
     return rows.map((r) => ({
       id: r.id,
       docKey: r.docKey,
+      name_snapshot: r.nameSnapshot,
       name: r.nameSnapshot,
       required: r.required,
       status: r.status,
@@ -903,6 +985,7 @@ export class TramitesService {
       docKey: f.docKey,
       version: f.version,
       uploaded_at: f.uploadedAt.toISOString(),
+      uploaded_by: f.uploadedById,
       page_count: f.pageCount,
       filename_original: f.filenameOriginal,
     }));
@@ -957,6 +1040,8 @@ export class TramitesService {
       await this.storage.writeFile(storagePath, fileBuffer);
 
       const created = await this.prisma.$transaction(async (tx) => {
+        await this.ensureChecklistItemForDocKey(tx, tramiteId, docKey, docType);
+
         const f = await tx.tramiteFile.create({
           data: {
             tramiteId,
