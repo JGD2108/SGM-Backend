@@ -30,6 +30,21 @@ import { ReabrirDto } from './dto/reabrir.dto';
 import { UploadTramiteFileDto } from './dto/upload-tramite-file.dto';
 
 const TMP_UPLOAD_DIR = path.join(os.tmpdir(), 'sgm-uploads');
+const PDF_ONLY_MIME_TYPES = new Set(['application/pdf']);
+const ALLOWED_UPLOAD_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpg',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+const MIME_EXTENSION_MAP: Record<string, string> = {
+  'application/pdf': '.pdf',
+  'image/jpg': '.jpg',
+  'image/jpeg': '.jpg',
+  'image/png': '.png',
+  'image/webp': '.webp',
+};
 
 function maxUploadBytes() {
   const raw = Number(process.env.MAX_UPLOAD_MB ?? 20);
@@ -37,20 +52,26 @@ function maxUploadBytes() {
   return mb * 1024 * 1024;
 }
 
-function pdfUploadOptions() {
+function extensionForUpload(file: Express.Multer.File) {
+  const extFromName = path.extname(file.originalname ?? '').toLowerCase();
+  if (extFromName) return extFromName;
+  return MIME_EXTENSION_MAP[file.mimetype] ?? '.bin';
+}
+
+function uploadOptions(allowedMimeTypes: Set<string>) {
   return {
     storage: diskStorage({
       destination: (_req, _file, cb) => {
         fs.mkdirSync(TMP_UPLOAD_DIR, { recursive: true });
         cb(null, TMP_UPLOAD_DIR);
       },
-      filename: (_req, _file, cb) => {
-        cb(null, `${Date.now()}-${randomUUID()}.pdf`);
+      filename: (_req, file, cb) => {
+        cb(null, `${Date.now()}-${randomUUID()}${extensionForUpload(file)}`);
       },
     }),
     limits: { fileSize: maxUploadBytes() },
     fileFilter: (_req: any, file: Express.Multer.File, cb: any) => {
-      cb(null, file.mimetype === 'application/pdf');
+      cb(null, allowedMimeTypes.has(file.mimetype));
     },
   };
 }
@@ -69,7 +90,7 @@ export class TramitesController {
 
   @Post()
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('factura', pdfUploadOptions()))
+  @UseInterceptors(FileInterceptor('factura', uploadOptions(PDF_ONLY_MIME_TYPES)))
   async create(
     @Body() dto: CreateTramiteDto,
     @UploadedFile() factura: Express.Multer.File,
@@ -130,7 +151,7 @@ export class TramitesController {
 
   @Post(':id/files')
   @ApiConsumes('multipart/form-data')
-  @UseInterceptors(FileInterceptor('file', pdfUploadOptions()))
+  @UseInterceptors(FileInterceptor('file', uploadOptions(ALLOWED_UPLOAD_MIME_TYPES)))
   async uploadFile(
     @Param('id') id: string,
     @Body() dto: UploadTramiteFileDto,

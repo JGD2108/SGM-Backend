@@ -24,6 +24,20 @@ function findSmallestMissing(sortedUsed: number[]): number {
   }
   return expected;
 }
+const SUPPORTED_UPLOAD_MIME_TYPES = new Set([
+  'application/pdf',
+  'image/jpg',
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+]);
+const MIME_EXTENSION_MAP: Record<string, string> = {
+  'application/pdf': 'pdf',
+  'image/jpg': 'jpg',
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
 
 @Injectable()
 export class TramitesService {
@@ -107,6 +121,66 @@ export class TramitesService {
     return p.trim().toUpperCase();
   }
 
+  private normalizeDocKey(docKey: string) {
+    return docKey.trim().toUpperCase();
+  }
+
+  private isPdfMimeType(mimetype: string) {
+    return mimetype === 'application/pdf';
+  }
+
+  private isSupportedUploadMimeType(mimetype: string) {
+    return SUPPORTED_UPLOAD_MIME_TYPES.has(mimetype);
+  }
+
+  private extensionForMimeType(mimetype: string) {
+    return MIME_EXTENSION_MAP[mimetype] ?? 'bin';
+  }
+
+  private resolveFilenameOriginal(
+    dto: UploadTramiteFileDto,
+    file: Express.Multer.File,
+    requestedDocKey?: string,
+    resolvedDocKey?: string,
+  ) {
+    const candidates = [dto.filenameOriginal, dto.customName, dto.nombrePersonalizado];
+    for (const candidate of candidates) {
+      if (!candidate) continue;
+      const clean = candidate.trim();
+      if (clean.length > 0) return clean;
+    }
+    if (requestedDocKey && resolvedDocKey && requestedDocKey !== resolvedDocKey) {
+      return requestedDocKey;
+    }
+    return file.originalname;
+  }
+
+  private async resolveUploadPageCount(file: Express.Multer.File, fileBuffer: Buffer) {
+    if (this.isPdfMimeType(file.mimetype)) {
+      return this.validatePdfOrThrow(fileBuffer);
+    }
+    return 1;
+  }
+
+  private async resolveDocType(docKey: string) {
+    const normalizedDocKey = this.normalizeDocKey(docKey);
+    const requestedType = await this.prisma.documentType.findUnique({ where: { key: normalizedDocKey } });
+    if (requestedType) {
+      return { requestedDocKey: normalizedDocKey, docKey: normalizedDocKey, docType: requestedType };
+    }
+
+    const fallbackType = await this.prisma.documentType.findUnique({ where: { key: 'OTRO' } });
+    if (!fallbackType) {
+      throw new AppError(
+        'MISSING_DOCUMENT_TYPE',
+        'No existe el tipo de documento OTRO en catálogos.',
+        { requestedDocKey: normalizedDocKey },
+        500,
+      );
+    }
+    return { requestedDocKey: normalizedDocKey, docKey: 'OTRO', docType: fallbackType };
+  }
+
   private async validatePdfOrThrow(buffer: Buffer) {
     const pageCount = await countPdfPages(buffer);
     const max = this.maxPdfPages();
@@ -119,7 +193,7 @@ export class TramitesService {
   // ✅ Reserva el menor libre. Si hay choque, reintenta.
   private async getUploadBuffer(file: Express.Multer.File | undefined, field: string): Promise<Buffer> {
     if (!file) {
-      throw new AppError('VALIDATION_ERROR', 'Archivo PDF obligatorio.', { field }, 400);
+      throw new AppError('VALIDATION_ERROR', 'Archivo obligatorio.', { field }, 400);
     }
     if (file.buffer) return file.buffer;
     if (file.path) return readFile(file.path);
@@ -832,10 +906,15 @@ export class TramitesService {
 
   async uploadFile(tramiteId: string, dto: UploadTramiteFileDto, file: Express.Multer.File, userId: string) {
     if (!file) {
-      throw new AppError('VALIDATION_ERROR', 'Archivo PDF obligatorio.', { field: 'file' }, 400);
+      throw new AppError('VALIDATION_ERROR', 'Archivo obligatorio.', { field: 'file' }, 400);
     }
-    if (file.mimetype !== 'application/pdf') {
-      throw new AppError('VALIDATION_ERROR', 'El archivo debe ser PDF.', { mimetype: file.mimetype }, 400);
+    if (!this.isSupportedUploadMimeType(file.mimetype)) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'Formato no soportado. Solo se permite PDF, JPG, PNG o WEBP.',
+        { mimetype: file.mimetype },
+        400,
+      );
     }
     if (file.size > this.maxUploadBytes()) {
       throw new AppError('UPLOAD_TOO_LARGE', 'Archivo demasiado grande.', {}, 413);
@@ -848,26 +927,27 @@ export class TramitesService {
     this.assertNotCanceled(tramite);
     this.assertNotFinalized(tramite);
 
-    const docType = await this.prisma.documentType.findUnique({ where: { key: dto.docKey } });
-    if (!docType) throw new AppError('VALIDATION_ERROR', 'docKey inválido.', { docKey: dto.docKey }, 400);
+    const { requestedDocKey, docKey, docType } = await this.resolveDocType(dto.docKey);
 
     const fileBuffer = await this.getUploadBuffer(file, 'file');
-    const pageCount = await this.validatePdfOrThrow(fileBuffer);
+    const pageCount = await this.resolveUploadPageCount(file, fileBuffer);
 
     const last = await this.prisma.tramiteFile.findFirst({
-      where: { tramiteId, docKey: dto.docKey },
+      where: { tramiteId, docKey },
       orderBy: { version: 'desc' },
       select: { version: true },
     });
     const version = (last?.version ?? 0) + 1;
 
-    const filename = `${dto.docKey}_v${version}.pdf`;
+    const extension = this.extensionForMimeType(file.mimetype);
+    const filename = `${docKey}_v${version}.${extension}`;
     const storagePath = this.storage.buildRelativePath(
       tramite.year,
       tramite.concesionarioCodeSnapshot,
       tramite.consecutivo,
       filename,
     );
+    const filenameOriginal = this.resolveFilenameOriginal(dto, file, requestedDocKey, docKey);
 
     try {
       await this.storage.writeFile(storagePath, fileBuffer);
@@ -876,9 +956,9 @@ export class TramitesService {
         const f = await tx.tramiteFile.create({
           data: {
             tramiteId,
-            docKey: dto.docKey,
+            docKey,
             documentTypeId: docType.id,
-            filenameOriginal: file.originalname,
+            filenameOriginal,
             storagePath,
             pageCount,
             version,
@@ -888,7 +968,7 @@ export class TramitesService {
 
         // marcar checklist como recibido si existe
         await tx.tramiteDocument.updateMany({
-          where: { tramiteId, docKey: dto.docKey },
+          where: { tramiteId, docKey },
           data: { status: 'RECIBIDO', receivedAt: new Date() },
         });
 
