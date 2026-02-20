@@ -21,9 +21,14 @@ export class JwtAuthGuard implements CanActivate {
 
     try {
       const payload = jwt.verify(token, secret) as any;
-      req.user = { id: payload.sub, email: payload.email, name: payload.name };
+      const userId = payload?.sub ?? payload?.id;
+      if (!userId) {
+        throw new AppError('UNAUTHORIZED', 'Token invalido o sin identificador de usuario.', {}, 401);
+      }
+      req.user = { id: userId, sub: payload?.sub ?? userId, email: payload?.email, name: payload?.name };
       return true;
-    } catch {
+    } catch (error) {
+      if (error instanceof AppError) throw error;
       throw new AppError('UNAUTHORIZED', 'Token inválido o expirado.', {}, 401);
     }
   }

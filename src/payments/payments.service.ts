@@ -40,7 +40,9 @@ export class PaymentsService {
     }));
   }
 
-  async create(tramiteId: string, dto: CreatePaymentDto, userId: string) {
+  async create(tramiteId: string, dto: CreatePaymentDto, userId: string | undefined) {
+    if (!userId) throw new AppError('UNAUTHORIZED', 'No autenticado.', {}, 401);
+
     const tramite = await this.prisma.tramite.findUnique({ where: { id: tramiteId } });
     if (!tramite) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id: tramiteId }, 404);
 
