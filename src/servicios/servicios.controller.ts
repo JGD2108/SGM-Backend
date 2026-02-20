@@ -1,9 +1,10 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt.guard';
 import { ServiciosService } from './servicios.service';
 import { CreateServicioDto } from './dto/create-servicio.dto';
 import { ChangeServicioEstadoDto } from './dto/change-servicio-estado.dto';
+import { CancelServicioDto } from './dto/cancel-servicio.dto';
 import { CreateServicioPagoDto } from './dto/create-servicio-pago.dto';
 import { PatchServicioDto } from './dto/patch-servicio.dto';
 
@@ -37,6 +38,16 @@ export class ServiciosController {
   @Patch(':id')
   async patch(@Param('id') id: string, @Body() dto: PatchServicioDto, @Req() req: any) {
     return this.service.patch(id, dto, req.user.id);
+  }
+
+  @Delete(':id')
+  async remove(@Param('id') id: string, @Req() req: any) {
+    return this.service.cancelar(id, undefined, req.user.id);
+  }
+
+  @Post(':id/cancelar')
+  async cancelar(@Param('id') id: string, @Body() dto: CancelServicioDto, @Req() req: any) {
+    return this.service.cancelar(id, dto.reason, req.user.id);
   }
 
   @Post(':id/estado')

@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma, ServicioEstado, ServicioTipo } from '@prisma/client';
+import { ActionType, Prisma, ServicioEstado, ServicioTipo } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AppError } from '../common/errors/app-error';
 import { CreateServicioDto } from './dto/create-servicio.dto';
@@ -42,6 +42,15 @@ export class ServiciosService {
         { estado_servicio: t.estadoServicio },
         409,
       );
+    }
+  }
+
+  private assertServicioCanBeCanceled(t: { estadoServicio: ServicioEstado | null }) {
+    if (t.estadoServicio === 'CANCELADO') {
+      throw new AppError('CONFLICT', 'Ya esta cancelado.', {}, 409);
+    }
+    if (t.estadoServicio === 'ENTREGADO') {
+      throw new AppError('CONFLICT', 'El servicio esta ENTREGADO. No se puede cancelar.', {}, 409);
     }
   }
 
@@ -365,15 +374,28 @@ export class ServiciosService {
   // POST /servicios/:id/estado
   // ==========================
   async changeEstado(id: string, toEstado: ServicioEstado, notes: string | undefined, userId: string) {
-    const t = await this.prisma.tramite.findUnique({ where: { id } });
+    const t = await this.prisma.tramite.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        tipoServicio: true,
+        estadoServicio: true,
+        radicadoAt: true,
+      },
+    });
     if (!t) throw new AppError('NOT_FOUND', 'Servicio no existe.', { id }, 404);
     this.assertNotMatriculaId(t);
-    this.assertServicioNotLocked({ estadoServicio: t.estadoServicio ?? null });
 
     const valid = Object.values(ServicioEstado) as string[];
     if (!valid.includes(String(toEstado))) {
-      throw new AppError('INVALID_STATE', 'Estado de servicio inválido.', { toEstado }, 400);
+      throw new AppError('INVALID_STATE', 'Estado de servicio invalido.', { toEstado }, 400);
     }
+
+    if (toEstado === 'CANCELADO') {
+      return this.cancelar(id, notes, userId, 'CANCELAR');
+    }
+
+    this.assertServicioNotLocked({ estadoServicio: t.estadoServicio ?? null });
 
     await this.prisma.$transaction(async (tx) => {
       await tx.servicioEstadoHist.create({
@@ -393,8 +415,50 @@ export class ServiciosService {
           estadoServicio: toEstado,
           ...(toEstado === 'RADICADO' ? { radicadoAt: t.radicadoAt ?? new Date() } : {}),
           ...(toEstado === 'ENTREGADO' ? { finalizedAt: new Date() } : {}),
-          ...(toEstado === 'CANCELADO' ? { canceledAt: new Date() } : {}),
         },
+      });
+    });
+
+    return this.getById(id);
+  }
+
+  // ==========================
+  // POST /servicios/:id/cancelar
+  // DELETE /servicios/:id
+  // ==========================
+  async cancelar(id: string, reason: string | undefined, userId: string, actionType: ActionType = 'CANCELAR') {
+    const t = await this.prisma.tramite.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        tipoServicio: true,
+        estadoServicio: true,
+      },
+    });
+    if (!t) throw new AppError('NOT_FOUND', 'Servicio no existe.', { id }, 404);
+    this.assertNotMatriculaId(t);
+    this.assertServicioCanBeCanceled({ estadoServicio: t.estadoServicio ?? null });
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.servicioEstadoHist.create({
+        data: {
+          tramiteId: id,
+          fromEstadoServicio: t.estadoServicio ?? null,
+          toEstadoServicio: 'CANCELADO',
+          changedById: userId,
+          notes: reason ?? null,
+          actionType,
+        },
+      });
+
+      await tx.tramite.update({
+        where: { id },
+        data: { estadoServicio: 'CANCELADO', canceledAt: new Date() },
+      });
+
+      await tx.consecutivoReserva.updateMany({
+        where: { tramiteId: id, status: 'RESERVADO' },
+        data: { status: 'LIBERADO', releasedAt: new Date(), tramiteId: null },
       });
     });
 
