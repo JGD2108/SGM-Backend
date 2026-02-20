@@ -1,7 +1,7 @@
 import { IsIn, IsInt, IsNotEmpty, IsOptional, IsString, Matches, MaxLength, Min } from 'class-validator';
 
 const PAYMENT_TYPES = ['TIMBRE', 'DERECHOS', 'OTRO'] as const;
-const PAYMENT_METHODS = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA', 'CONSIGNACION', 'OTRO'] as const;
+const PAYMENT_METHODS = ['EFECTIVO', 'TRANSFERENCIA', 'TARJETA', 'CONSIGNACION', 'PSE', 'OTRO'] as const;
 
 export class CreatePaymentDto {
   @IsString()

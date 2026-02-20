@@ -76,6 +76,7 @@ enum MedioPago {
   TRANSFERENCIA
   TARJETA
   CONSIGNACION
+  PSE
   OTRO
 }
 
