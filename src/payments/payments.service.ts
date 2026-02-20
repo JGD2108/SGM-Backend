@@ -69,4 +69,25 @@ export class PaymentsService {
       notes: created.notes ?? '',
     };
   }
+
+  async remove(tramiteId: string, paymentId: string) {
+    const tramite = await this.prisma.tramite.findUnique({
+      where: { id: tramiteId },
+      select: { estadoActual: true },
+    });
+
+    if (tramite) {
+      this.assertNotFinalizedOrCanceled(tramite);
+    }
+
+    const deleted = await this.prisma.payment.deleteMany({
+      where: { id: paymentId, tramiteId },
+    });
+
+    if (deleted.count === 0) {
+      throw new AppError('PAYMENT_NOT_FOUND', 'Pago no encontrado.', { tramiteId, paymentId }, 404);
+    }
+
+    return { ok: true };
+  }
 }

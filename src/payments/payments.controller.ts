@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Post, Req, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { AppError } from '../common/errors/app-error';
 import { JwtAuthGuard } from '../common/guards/jwt.guard';
@@ -23,5 +23,10 @@ export class PaymentsController {
     const userId = req?.user?.sub ?? req?.user?.id;
     if (!userId) throw new AppError('UNAUTHORIZED', 'No autenticado.', {}, 401);
     return this.service.create(tramiteId, dto, userId);
+  }
+
+  @Delete(':paymentId')
+  async removePayment(@Param('tramiteId') tramiteId: string, @Param('paymentId') paymentId: string) {
+    return this.service.remove(tramiteId, paymentId);
   }
 }
