@@ -52,9 +52,9 @@ export class TramitesService {
   ) {}
 
   private maxPdfPages(): number {
-    const raw = this.config.get<string>('MAX_PDF_PAGES') ?? '10';
+    const raw = this.config.get<string>('MAX_PDF_PAGES') ?? '15';
     const n = Number(raw);
-    return Number.isFinite(n) ? n : 10;
+    return Number.isFinite(n) ? n : 15;
   }
 
   private maxUploadBytes(): number {
