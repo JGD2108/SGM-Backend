@@ -4,6 +4,8 @@ import type { Response } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt.guard';
 import { TramitesService } from '../tramites/tramites.service';
 import { SaveCuentaCobroPagosDto } from '../tramites/dto/save-cuenta-cobro-pagos.dto';
+import { SetCuentaCobroAbonoDto } from '../tramites/dto/set-cuenta-cobro-abono.dto';
+import { SetCuentaCobroBaseDto } from '../tramites/dto/set-cuenta-cobro-base.dto';
 import { SetCuentaCobroHonorariosDto } from '../tramites/dto/set-cuenta-cobro-honorarios.dto';
 import { ServiciosService } from './servicios.service';
 import { CreateServicioDto } from './dto/create-servicio.dto';
@@ -96,6 +98,25 @@ export class ServiciosController {
     return this.tramitesService.saveCuentaCobroPagos(id, dto, req.user.id);
   }
 
+  @Post(':id/cuenta-cobro/pagos')
+  async saveCuentaCobroPagosPost(
+    @Param('id') id: string,
+    @Body() dto: SaveCuentaCobroPagosDto,
+    @Req() req: any,
+  ) {
+    return this.tramitesService.saveCuentaCobroPagos(id, dto, req.user.id);
+  }
+
+  @Patch(':id/cuenta-cobro/base')
+  async setCuentaCobroBase(@Param('id') id: string, @Body() dto: SetCuentaCobroBaseDto, @Req() req: any) {
+    return this.tramitesService.setCuentaCobroBase(id, dto, req.user.id);
+  }
+
+  @Post(':id/cuenta-cobro/base')
+  async setCuentaCobroBasePost(@Param('id') id: string, @Body() dto: SetCuentaCobroBaseDto, @Req() req: any) {
+    return this.tramitesService.setCuentaCobroBase(id, dto, req.user.id);
+  }
+
   @Patch(':id/cuenta-cobro/honorarios')
   async setCuentaCobroHonorarios(
     @Param('id') id: string,
@@ -103,6 +124,25 @@ export class ServiciosController {
     @Req() req: any,
   ) {
     return this.tramitesService.setCuentaCobroHonorarios(id, dto.honorarios, req.user.id);
+  }
+
+  @Post(':id/cuenta-cobro/honorarios')
+  async setCuentaCobroHonorariosPost(
+    @Param('id') id: string,
+    @Body() dto: SetCuentaCobroHonorariosDto,
+    @Req() req: any,
+  ) {
+    return this.tramitesService.setCuentaCobroHonorarios(id, dto.honorarios, req.user.id);
+  }
+
+  @Patch(':id/cuenta-cobro/abono')
+  async setCuentaCobroAbono(@Param('id') id: string, @Body() dto: SetCuentaCobroAbonoDto, @Req() req: any) {
+    return this.tramitesService.setCuentaCobroAbono(id, dto.abono, req.user.id);
+  }
+
+  @Post(':id/cuenta-cobro/abono')
+  async setCuentaCobroAbonoPost(@Param('id') id: string, @Body() dto: SetCuentaCobroAbonoDto, @Req() req: any) {
+    return this.tramitesService.setCuentaCobroAbono(id, dto.abono, req.user.id);
   }
 
   @Get(':id/cuenta-cobro.pdf')

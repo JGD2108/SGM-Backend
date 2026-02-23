@@ -10,11 +10,13 @@ import {
   CUENTA_COBRO_CONCEPTS,
   CUENTA_COBRO_PDF_COORDS,
   findCuentaCobroConcept,
+  findCuentaCobroConceptById,
   resolveCuentaCobroServiceName,
 } from './cuenta-cobro.config';
 import { CreateTramiteDto } from './dto/create-tramite.dto';
 import { PatchTramiteDto } from './dto/patch-tramite.dto';
 import { SaveCuentaCobroPagosDto } from './dto/save-cuenta-cobro-pagos.dto';
+import { SetCuentaCobroBaseDto } from './dto/set-cuenta-cobro-base.dto';
 import { UploadTramiteFileDto } from './dto/upload-tramite-file.dto';
 import {
   Prisma,
@@ -69,6 +71,14 @@ type CuentaCobroTramiteRecord = {
   honorariosValor: Prisma.Decimal | null;
   cuentaCobroConcepto: string | null;
   cuentaCobroValor: Prisma.Decimal | null;
+  cuentaCobroAbono: Prisma.Decimal | null;
+  cuentaCobroFecha: Date | null;
+  cuentaCobroServiceId: string | null;
+  cuentaCobroClienteNombre: string | null;
+  cuentaCobroClienteDoc: string | null;
+  cuentaCobroPlaca: string | null;
+  cuentaCobroCiudad: string | null;
+  cuentaCobroConcesionario: string | null;
   concesionarioCodeSnapshot: string;
   consecutivo: number;
   concesionario: { name: string } | null;
@@ -132,6 +142,22 @@ export class TramitesService {
     return Math.round(n).toLocaleString('es-CO');
   }
 
+  private normalizeCuentaCobroText(value: unknown): string | null | undefined {
+    if (value === undefined) return undefined;
+    if (value === null) return null;
+    const s = String(value).trim();
+    return s.length > 0 ? s : null;
+  }
+
+  private resolveCuentaCobroServiceNameFromSnapshot(t: CuentaCobroTramiteRecord) {
+    const serviceIdRaw = t.cuentaCobroServiceId?.trim() || '';
+    const enumValues = new Set(Object.values(ServicioTipo) as string[]);
+    if (serviceIdRaw && enumValues.has(serviceIdRaw)) {
+      return resolveCuentaCobroServiceName(serviceIdRaw as ServicioTipo, t.serviceData ?? undefined);
+    }
+    return resolveCuentaCobroServiceName(t.tipoServicio, t.serviceData ?? undefined);
+  }
+
   private parseCuentaCobroFecha(value?: string): Date {
     if (!value || value.trim().length === 0) return new Date();
     const d = value.includes('T') ? new Date(value) : new Date(`${value}T00:00:00.000Z`);
@@ -172,8 +198,19 @@ export class TramitesService {
   }
 
   private buildCuentaCobroState(t: CuentaCobroTramiteRecord) {
-    const servicioNombreBd = resolveCuentaCobroServiceName(t.tipoServicio, t.serviceData ?? undefined);
+    const servicioNombreBd = this.resolveCuentaCobroServiceNameFromSnapshot(t);
     const servicioNombrePdf = (t.cuentaCobroConcepto?.trim() || servicioNombreBd).trim();
+    const fechaCuentaCobro = t.cuentaCobroFecha ?? new Date();
+    const encabezadoCliente = (t.cuentaCobroClienteNombre?.trim() || t.cliente.nombre || '').trim();
+    const encabezadoDoc = (t.cuentaCobroClienteDoc?.trim() || t.cliente.doc || '').trim();
+    const encabezadoPlaca = (t.cuentaCobroPlaca?.trim() || t.placa || '').trim();
+    const encabezadoCiudad = (t.cuentaCobroCiudad?.trim() || t.ciudad.name || '').trim();
+    const encabezadoConcesionario = (
+      t.cuentaCobroConcesionario?.trim() ||
+      t.concesionario?.name ||
+      t.concesionarioCodeSnapshot ||
+      ''
+    ).trim();
 
     const managedPayments = t.payments.filter((p) => !!findCuentaCobroConcept(p.conceptoKey));
     const legacyPayments = t.payments.filter((p) => !findCuentaCobroConcept(p.conceptoKey));
@@ -186,6 +223,7 @@ export class TramitesService {
         anio: number | null;
         last_fecha: Date | null;
         label_snapshot: string | null;
+        notes_snapshot: string | null;
         ids: string[];
       }
     >();
@@ -211,6 +249,7 @@ export class TramitesService {
           anio: null,
           last_fecha: null,
           label_snapshot: null,
+          notes_snapshot: null,
           ids: [],
         };
       acc.amount_total += amountTotal;
@@ -218,6 +257,7 @@ export class TramitesService {
       acc.anio = p.anio ?? acc.anio ?? t.year;
       acc.last_fecha = p.fecha ?? acc.last_fecha;
       acc.label_snapshot = (p.conceptoLabelSnapshot?.trim() || acc.label_snapshot) ?? null;
+      acc.notes_snapshot = (p.notes?.trim() || acc.notes_snapshot) ?? null;
       acc.ids.push(p.id);
       grouped.set(def.key, acc);
     }
@@ -232,6 +272,7 @@ export class TramitesService {
         (def.key === 'SERVICIO_PRINCIPAL' ? servicioNombrePdf : def.label);
       return {
         key: def.key,
+        conceptoId: def.conceptoId,
         label,
         concept_name: label,
         has4x1000: def.has4x1000,
@@ -240,6 +281,8 @@ export class TramitesService {
         year: anio,
         amount_total,
         amount_4x1000,
+        observacion: g?.notes_snapshot ?? '',
+        fecha: g?.last_fecha ? g.last_fecha.toISOString().slice(0, 10) : null,
         total: amount_total + amount_4x1000,
       };
     });
@@ -248,7 +291,7 @@ export class TramitesService {
     const servicio_por_tramite_valor = Number((t as any).cuentaCobroValor ?? 0);
     const honorarios = Number((t as any).honorariosValor ?? 0);
     const total_cuenta_de_cobro = servicio_por_tramite_valor + honorarios;
-    const menos_abono = 0;
+    const menos_abono = Math.max(0, Number((t as any).cuentaCobroAbono ?? 0));
     const mas_total_cuenta_de_cobro = total_cuenta_de_cobro;
     const total_a_cancelar = total_a_reembolsar + mas_total_cuenta_de_cobro;
     const saldo_pdte_por_cancelar = total_a_cancelar - menos_abono;
@@ -256,15 +299,16 @@ export class TramitesService {
     return {
       tramite: t,
       encabezado: {
-        fecha: new Date().toISOString().slice(0, 10),
-        cliente: t.cliente.nombre,
-        nit_o_cc: t.cliente.doc,
-        placas: t.placa ?? '',
-        ciudad: t.ciudad.name,
-        concesionario: t.concesionario?.name ?? t.concesionarioCodeSnapshot,
+        fecha: fechaCuentaCobro.toISOString().slice(0, 10),
+        fecha_date: fechaCuentaCobro,
+        cliente: encabezadoCliente,
+        nit_o_cc: encabezadoDoc,
+        placas: encabezadoPlaca,
+        ciudad: encabezadoCiudad,
+        concesionario: encabezadoConcesionario,
       },
       servicio: {
-        id: t.tipoServicio,
+        id: t.cuentaCobroServiceId?.trim() || t.tipoServicio,
         nombre: servicioNombreBd,
         nombre_pdf: servicioNombrePdf,
         valor: servicio_por_tramite_valor,
@@ -874,7 +918,37 @@ export class TramitesService {
   async cuentaCobroData(id: string) {
     const t = await this.getCuentaCobroTramiteOrThrow(id);
     const state = this.buildCuentaCobroState(t);
+    const pagos = state.conceptos.map((c) => ({
+      conceptoId: c.conceptoId,
+      concepto: c.label,
+      anio: c.anio == null ? '' : String(c.anio),
+      valor_total: c.amount_total,
+      valor_4x1000: c.amount_4x1000,
+      observacion: c.observacion ?? '',
+    }));
+    const totales = {
+      totalAReembolsar: state.totales.total_a_reembolsar,
+      masTotalCuentaDeCobro: state.totales.mas_total_cuenta_de_cobro,
+      totalACancelar: state.totales.total_a_cancelar,
+      menosAbono: state.totales.menos_abono,
+      saldoPdtePorCancelar: state.totales.saldo_pdte_por_cancelar,
+    };
     return {
+      ...state,
+      baseData: {
+        serviceId: String(state.servicio.id),
+        servicio: state.servicio.nombre,
+        fecha: state.encabezado.fecha,
+        cliente: state.encabezado.cliente,
+        clienteDoc: state.encabezado.nit_o_cc,
+        placas: state.encabezado.placas,
+        ciudad: state.encabezado.ciudad,
+        concesionario: state.encabezado.concesionario,
+      },
+      honorarios: state.honorarios,
+      abono: state.totales.menos_abono,
+      pagos,
+      totales,
       tramite_id: t.id,
       display_id: this.displayId(t.year, t.concesionarioCodeSnapshot, t.consecutivo),
       base: {
@@ -888,21 +962,84 @@ export class TramitesService {
         ciudad: state.encabezado.ciudad,
         concesionario: state.encabezado.concesionario,
       },
-      ...state,
     };
   }
 
   async cuentaCobroResumen(id: string) {
     const t = await this.getCuentaCobroTramiteOrThrow(id);
     const state = this.buildCuentaCobroState(t);
+    const totales = {
+      totalAReembolsar: state.totales.total_a_reembolsar,
+      masTotalCuentaDeCobro: state.totales.mas_total_cuenta_de_cobro,
+      totalACancelar: state.totales.total_a_cancelar,
+      menosAbono: state.totales.menos_abono,
+      saldoPdtePorCancelar: state.totales.saldo_pdte_por_cancelar,
+    };
     return {
+      baseData: {
+        serviceId: String(state.servicio.id),
+        servicio: state.servicio.nombre,
+        fecha: state.encabezado.fecha,
+        cliente: state.encabezado.cliente,
+        clienteDoc: state.encabezado.nit_o_cc,
+        placas: state.encabezado.placas,
+        ciudad: state.encabezado.ciudad,
+        concesionario: state.encabezado.concesionario,
+      },
+      honorarios: state.honorarios,
+      abono: state.totales.menos_abono,
+      pagos: state.conceptos.map((c) => ({
+        conceptoId: c.conceptoId,
+        concepto: c.label,
+        anio: c.anio == null ? '' : String(c.anio),
+        valor_total: c.amount_total,
+        valor_4x1000: c.amount_4x1000,
+        observacion: c.observacion ?? '',
+      })),
+      totales,
       tramite_id: t.id,
       display_id: this.displayId(t.year, t.concesionarioCodeSnapshot, t.consecutivo),
       servicio: state.servicio,
-      honorarios: state.honorarios,
-      totales: state.totales,
+      totales_detalle: state.totales,
       legacy_payments_detected: state.legacy_payments_detected,
     };
+  }
+
+  async setCuentaCobroBase(id: string, dto: SetCuentaCobroBaseDto, _userId: string | undefined) {
+    const t = await this.prisma.tramite.findUnique({ where: { id } });
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    this.assertNotCanceled(t);
+    this.assertNotFinalized(t);
+
+    const serviceIdCandidate = this.normalizeCuentaCobroText(dto.service_id ?? dto.serviceId);
+    const servicioNombre = this.normalizeCuentaCobroText(dto.servicio);
+    const clienteNombre = this.normalizeCuentaCobroText(dto.cliente);
+    const clienteDoc = this.normalizeCuentaCobroText(
+      dto.clienteDoc ?? dto.cliente_doc ?? dto.documento ?? dto.nit_o_cc,
+    );
+    const placaRaw = this.normalizeCuentaCobroText(dto.placa ?? dto.placas);
+    const ciudad = this.normalizeCuentaCobroText(dto.ciudad);
+    const concesionario = this.normalizeCuentaCobroText(dto.concesionario);
+    const fecha =
+      dto.fecha === undefined ? ((t as any).cuentaCobroFecha as Date | null) ?? new Date() : this.parseCuentaCobroFecha(dto.fecha);
+
+    const data: Prisma.TramiteUpdateInput = {
+      cuentaCobroFecha: fecha,
+      ...(serviceIdCandidate !== undefined ? { cuentaCobroServiceId: serviceIdCandidate } : {}),
+      ...(servicioNombre !== undefined ? { cuentaCobroConcepto: servicioNombre } : {}),
+      ...(clienteNombre !== undefined ? { cuentaCobroClienteNombre: clienteNombre } : {}),
+      ...(clienteDoc !== undefined ? { cuentaCobroClienteDoc: clienteDoc } : {}),
+      ...(placaRaw !== undefined ? { cuentaCobroPlaca: placaRaw ? this.normalizePlaca(placaRaw) : null } : {}),
+      ...(ciudad !== undefined ? { cuentaCobroCiudad: ciudad } : {}),
+      ...(concesionario !== undefined ? { cuentaCobroConcesionario: concesionario } : {}),
+    };
+
+    await this.prisma.tramite.update({
+      where: { id },
+      data,
+    });
+
+    return this.cuentaCobroData(id);
   }
 
   async saveCuentaCobroPagos(id: string, dto: SaveCuentaCobroPagosDto, userId: string | undefined) {
@@ -921,22 +1058,29 @@ export class TramitesService {
     this.assertNotCanceled(t);
     this.assertNotFinalized(t);
 
-    if ((dto.items?.length ?? 0) > CUENTA_COBRO_CONCEPTS.length) {
+    const payloadItems = dto.pagos ?? dto.conceptos ?? dto.items ?? [];
+
+    if ((payloadItems?.length ?? 0) > CUENTA_COBRO_CONCEPTS.length) {
       throw new AppError(
         'VALIDATION_ERROR',
         'La plantilla solo soporta un número limitado de conceptos.',
-        { maxConcepts: CUENTA_COBRO_CONCEPTS.length, received: dto.items?.length ?? 0 },
+        { maxConcepts: CUENTA_COBRO_CONCEPTS.length, received: payloadItems?.length ?? 0 },
         400,
       );
     }
 
     const assignedKeys = new Set<string>();
     let nextSlotIndex = 0;
-    const normalizedItems = (dto.items ?? []).map((item) => {
+    const normalizedItems = payloadItems.map((item) => {
+      const explicitId = (item as any).conceptoId ? String((item as any).conceptoId).trim().toLowerCase() : undefined;
       const explicitKey = item.concepto_key ? String(item.concepto_key).trim().toUpperCase() : undefined;
-      let def = explicitKey ? findCuentaCobroConcept(explicitKey) : undefined;
+      let def = explicitId ? findCuentaCobroConceptById(explicitId) : undefined;
+      if (!def && explicitKey) def = findCuentaCobroConcept(explicitKey);
       if (explicitKey && !def) {
         throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inválido.', { concepto_key: explicitKey }, 400);
+      }
+      if (explicitId && !def) {
+        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inválido.', { conceptoId: explicitId }, 400);
       }
 
       if (!def) {
@@ -959,8 +1103,20 @@ export class TramitesService {
       }
       assignedKeys.add(def.key);
 
-      const amountTotal = Math.max(0, Number(item.amount_total ?? 0) || 0);
-      const amount4x1000 = Math.max(0, Number(item.amount_4x1000 ?? 0) || 0);
+      const amountTotalRaw = (item as any).valor_total ?? item.amount_total;
+      const amount4x1000Raw = (item as any).valor_4x1000 ?? item.amount_4x1000;
+      const amountTotalParsed = this.parseMoney(amountTotalRaw);
+      const amount4x1000Parsed = this.parseMoney(amount4x1000Raw);
+      const amountTotal = Math.max(0, Number((amountTotalParsed ?? 0)));
+      const amount4x1000 = Math.max(0, Number((amount4x1000Parsed ?? 0)));
+      if (!Number.isFinite(amountTotal) || !Number.isFinite(amount4x1000)) {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          'Montos inválidos en cuenta de cobro.',
+          { conceptoId: explicitId ?? def.key, valor_total: amountTotalRaw, valor_4x1000: amount4x1000Raw },
+          400,
+        );
+      }
       if (!def.has4x1000 && amount4x1000 > 0) {
         throw new AppError(
           'VALIDATION_ERROR',
@@ -970,13 +1126,17 @@ export class TramitesService {
         );
       }
 
-      const conceptNameRaw = typeof (item as any).concept_name === 'string' ? (item as any).concept_name.trim() : '';
+      const conceptNameCandidate = (item as any).concepto ?? (item as any).concept_name;
+      const conceptNameRaw = typeof conceptNameCandidate === 'string' ? conceptNameCandidate.trim() : '';
+      const observacionCandidate = (item as any).observacion ?? item.notes;
+      const observacionRaw = typeof observacionCandidate === 'string' ? observacionCandidate.trim() : '';
       return {
         item,
         def,
         amountTotal,
         amount4x1000,
         conceptNameRaw,
+        observacionRaw,
       };
     });
 
@@ -991,14 +1151,22 @@ export class TramitesService {
       });
 
       for (const row of normalizedItems) {
-        const { item, def, amountTotal, amount4x1000, conceptNameRaw } = row;
+        const { item, def, amountTotal, amount4x1000, conceptNameRaw, observacionRaw } = row;
         const rowTotal = amountTotal + amount4x1000;
         if (rowTotal <= 0) continue;
 
         const defaultLabel = def.key === 'SERVICIO_PRINCIPAL' ? servicioNombre : def.label;
         const label = conceptNameRaw || defaultLabel;
         const inputYear = (item as any).year ?? item.anio;
-        const anio = def.yearTop !== undefined ? Math.max(2000, Number(inputYear ?? t.year ?? new Date().getFullYear())) : null;
+        let anio: number | null = null;
+        if (def.yearTop !== undefined) {
+          const yearRaw = inputYear ?? t.year ?? new Date().getFullYear();
+          const yearNum = Number(yearRaw);
+          if (!Number.isFinite(yearNum) || yearNum < 2000) {
+            throw new AppError('VALIDATION_ERROR', 'Año inválido para cuenta de cobro.', { conceptoId: def.conceptoId, anio: yearRaw }, 400);
+          }
+          anio = Math.trunc(yearNum);
+        }
 
         await tx.payment.create({
           data: {
@@ -1012,7 +1180,7 @@ export class TramitesService {
             amount4x1000,
             fecha: this.parseCuentaCobroFecha(item.fecha),
             medioPago: ((item.medio_pago ?? 'OTRO') as MedioPago) ?? 'OTRO',
-            notes: item.notes ?? null,
+            notes: observacionRaw || null,
             createdById: userId,
           },
         });
@@ -1033,6 +1201,22 @@ export class TramitesService {
     await this.prisma.tramite.update({
       where: { id },
       data: { honorariosValor: honorariosNormalized as any },
+    });
+
+    return this.cuentaCobroResumen(id);
+  }
+
+  async setCuentaCobroAbono(id: string, abono: number | undefined, _userId: string | undefined) {
+    const t = await this.prisma.tramite.findUnique({ where: { id } });
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    this.assertNotCanceled(t);
+    this.assertNotFinalized(t);
+
+    const abonoNormalized = Math.max(0, Number(abono ?? 0) || 0);
+
+    await this.prisma.tramite.update({
+      where: { id },
+      data: { cuentaCobroAbono: abonoNormalized as any },
     });
 
     return this.cuentaCobroResumen(id);
@@ -1725,7 +1909,7 @@ export class TramitesService {
     };
 
     const cuentaId = this.cuentaCobroDisplayId(t.year, t.concesionarioCodeSnapshot, t.consecutivo);
-    const fecha = this.formatCuentaCobroDate(new Date());
+    const fecha = this.formatCuentaCobroDate((((state as any).encabezado?.fecha_date as Date | undefined) ?? new Date()));
     const clienteNombre = (state.encabezado.cliente ?? '').trim().toUpperCase();
     const clienteDoc = (state.encabezado.nit_o_cc ?? '').trim();
     const placa = (state.encabezado.placas ?? '').trim().toUpperCase();

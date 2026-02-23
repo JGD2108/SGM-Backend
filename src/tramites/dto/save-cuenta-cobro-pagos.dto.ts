@@ -39,7 +39,15 @@ function normalizeYear(value: unknown) {
 export class CuentaCobroPagoItemDto {
   @IsString()
   @IsOptional()
+  conceptoId?: string;
+
+  @IsString()
+  @IsOptional()
   concept_name?: string;
+
+  @IsString()
+  @IsOptional()
+  concepto?: string;
 
   @IsString()
   @IsIn(CUENTA_COBRO_CONCEPT_KEYS)
@@ -58,7 +66,21 @@ export class CuentaCobroPagoItemDto {
   @IsInt()
   @Min(0)
   @IsOptional()
+  valor_total?: number;
+
+  @Transform(({ value }) => normalizeAmountOrZero(value))
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
   amount_4x1000?: number;
+
+  @Transform(({ value }) => normalizeAmountOrZero(value))
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  valor_4x1000?: number;
 
   @Transform(({ value }) => normalizeYear(value))
   @Type(() => Number)
@@ -88,6 +110,11 @@ export class CuentaCobroPagoItemDto {
   @IsOptional()
   @MaxLength(500)
   notes?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  observacion?: string;
 }
 
 export class SaveCuentaCobroPagosDto {
@@ -95,5 +122,20 @@ export class SaveCuentaCobroPagosDto {
   @ArrayMaxSize(20)
   @ValidateNested({ each: true })
   @Type(() => CuentaCobroPagoItemDto)
-  items: CuentaCobroPagoItemDto[];
+  @IsOptional()
+  pagos?: CuentaCobroPagoItemDto[];
+
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CuentaCobroPagoItemDto)
+  @IsOptional()
+  conceptos?: CuentaCobroPagoItemDto[];
+
+  @IsArray()
+  @ArrayMaxSize(20)
+  @ValidateNested({ each: true })
+  @Type(() => CuentaCobroPagoItemDto)
+  @IsOptional()
+  items?: CuentaCobroPagoItemDto[];
 }

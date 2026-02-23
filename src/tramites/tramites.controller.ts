@@ -29,6 +29,8 @@ import { CreateTramiteDto } from './dto/create-tramite.dto';
 import { PatchTramiteDto } from './dto/patch-tramite.dto';
 import { ReabrirDto } from './dto/reabrir.dto';
 import { SaveCuentaCobroPagosDto } from './dto/save-cuenta-cobro-pagos.dto';
+import { SetCuentaCobroAbonoDto } from './dto/set-cuenta-cobro-abono.dto';
+import { SetCuentaCobroBaseDto } from './dto/set-cuenta-cobro-base.dto';
 import { SetCuentaCobroHonorariosDto } from './dto/set-cuenta-cobro-honorarios.dto';
 import { UploadTramiteFileDto } from './dto/upload-tramite-file.dto';
 
@@ -183,6 +185,33 @@ export class TramitesController {
     return this.service.saveCuentaCobroPagos(id, dto, req.user.id);
   }
 
+  @Post(':id/cuenta-cobro/pagos')
+  async saveCuentaCobroPagosPost(
+    @Param('id') id: string,
+    @Body() dto: SaveCuentaCobroPagosDto,
+    @Req() req: any,
+  ) {
+    return this.service.saveCuentaCobroPagos(id, dto, req.user.id);
+  }
+
+  @Patch(':id/cuenta-cobro/base')
+  async setCuentaCobroBase(
+    @Param('id') id: string,
+    @Body() dto: SetCuentaCobroBaseDto,
+    @Req() req: any,
+  ) {
+    return this.service.setCuentaCobroBase(id, dto, req.user.id);
+  }
+
+  @Post(':id/cuenta-cobro/base')
+  async setCuentaCobroBasePost(
+    @Param('id') id: string,
+    @Body() dto: SetCuentaCobroBaseDto,
+    @Req() req: any,
+  ) {
+    return this.service.setCuentaCobroBase(id, dto, req.user.id);
+  }
+
   @Patch(':id/cuenta-cobro/honorarios')
   async setCuentaCobroHonorarios(
     @Param('id') id: string,
@@ -190,6 +219,33 @@ export class TramitesController {
     @Req() req: any,
   ) {
     return this.service.setCuentaCobroHonorarios(id, dto.honorarios, req.user.id);
+  }
+
+  @Post(':id/cuenta-cobro/honorarios')
+  async setCuentaCobroHonorariosPost(
+    @Param('id') id: string,
+    @Body() dto: SetCuentaCobroHonorariosDto,
+    @Req() req: any,
+  ) {
+    return this.service.setCuentaCobroHonorarios(id, dto.honorarios, req.user.id);
+  }
+
+  @Patch(':id/cuenta-cobro/abono')
+  async setCuentaCobroAbono(
+    @Param('id') id: string,
+    @Body() dto: SetCuentaCobroAbonoDto,
+    @Req() req: any,
+  ) {
+    return this.service.setCuentaCobroAbono(id, dto.abono, req.user.id);
+  }
+
+  @Post(':id/cuenta-cobro/abono')
+  async setCuentaCobroAbonoPost(
+    @Param('id') id: string,
+    @Body() dto: SetCuentaCobroAbonoDto,
+    @Req() req: any,
+  ) {
+    return this.service.setCuentaCobroAbono(id, dto.abono, req.user.id);
   }
 
   @Get(':id/cuenta-cobro.pdf')

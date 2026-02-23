@@ -12,6 +12,7 @@ export type CuentaCobroConceptKey =
 
 export type CuentaCobroConceptDef = {
   key: CuentaCobroConceptKey;
+  conceptoId: string;
   label: string;
   has4x1000: boolean;
   label4x1000: string;
@@ -27,6 +28,7 @@ export type CuentaCobroConceptDef = {
 export const CUENTA_COBRO_CONCEPTS: CuentaCobroConceptDef[] = [
   {
     key: 'IMPUESTO_TIMBRE',
+    conceptoId: 'impuesto_timbre',
     label: 'Impuesto de Timbre',
     has4x1000: true,
     label4x1000: '4*1000 Timbre',
@@ -39,6 +41,7 @@ export const CUENTA_COBRO_CONCEPTS: CuentaCobroConceptDef[] = [
   },
   {
     key: 'IMPUESTO_TRANSITO',
+    conceptoId: 'impuesto_transito',
     label: 'Impuesto de transito',
     has4x1000: true,
     label4x1000: '4*1000',
@@ -51,6 +54,7 @@ export const CUENTA_COBRO_CONCEPTS: CuentaCobroConceptDef[] = [
   },
   {
     key: 'MATRICULA',
+    conceptoId: 'matricula',
     label: 'Matricula',
     has4x1000: true,
     label4x1000: '4*1000',
@@ -63,6 +67,7 @@ export const CUENTA_COBRO_CONCEPTS: CuentaCobroConceptDef[] = [
   },
   {
     key: 'SERVICIO_PRINCIPAL',
+    conceptoId: 'servicio',
     label: 'Traspaso', // en PDF se reemplaza dinámicamente con el servicio real
     has4x1000: true,
     label4x1000: '4*1000',
@@ -75,6 +80,7 @@ export const CUENTA_COBRO_CONCEPTS: CuentaCobroConceptDef[] = [
   },
   {
     key: 'ENVIO_1',
+    conceptoId: 'envio_1',
     label: 'Envio',
     has4x1000: true,
     label4x1000: '4*1000',
@@ -87,6 +93,7 @@ export const CUENTA_COBRO_CONCEPTS: CuentaCobroConceptDef[] = [
   },
   {
     key: 'ENVIO_2',
+    conceptoId: 'envio_2',
     label: 'Envio',
     has4x1000: false,
     label4x1000: '',
@@ -97,6 +104,7 @@ export const CUENTA_COBRO_CONCEPTS: CuentaCobroConceptDef[] = [
   },
   {
     key: 'PAGO_MULTAS',
+    conceptoId: 'pago_multas',
     label: 'pago de multas',
     has4x1000: false,
     label4x1000: '',
@@ -108,10 +116,16 @@ export const CUENTA_COBRO_CONCEPTS: CuentaCobroConceptDef[] = [
 ];
 
 export const CUENTA_COBRO_CONCEPT_MAP = new Map(CUENTA_COBRO_CONCEPTS.map((c) => [c.key, c] as const));
+export const CUENTA_COBRO_CONCEPT_FRONTEND_MAP = new Map(CUENTA_COBRO_CONCEPTS.map((c) => [c.conceptoId, c] as const));
 
 export function findCuentaCobroConcept(key: string | null | undefined): CuentaCobroConceptDef | undefined {
   if (!key) return undefined;
   return CUENTA_COBRO_CONCEPT_MAP.get(String(key).trim().toUpperCase() as CuentaCobroConceptKey);
+}
+
+export function findCuentaCobroConceptById(conceptoId: string | null | undefined): CuentaCobroConceptDef | undefined {
+  if (!conceptoId) return undefined;
+  return CUENTA_COBRO_CONCEPT_FRONTEND_MAP.get(String(conceptoId).trim().toLowerCase());
 }
 
 const SERVICE_NAME_BY_TIPO = new Map(getServiceTemplates().map((t) => [t.tipo, t.nombre] as const));

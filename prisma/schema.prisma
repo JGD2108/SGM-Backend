@@ -166,6 +166,14 @@ model Tramite {
   honorariosValor Decimal? @db.Decimal(14, 2)
   cuentaCobroConcepto String?
   cuentaCobroValor    Decimal? @db.Decimal(14, 2)
+  cuentaCobroAbono    Decimal? @db.Decimal(14, 2)
+  cuentaCobroFecha    DateTime?
+  cuentaCobroServiceId String?
+  cuentaCobroClienteNombre String?
+  cuentaCobroClienteDoc String?
+  cuentaCobroPlaca String?
+  cuentaCobroCiudad String?
+  cuentaCobroConcesionario String?
 
   // NUEVO: multi-servicios
   tipoServicio   ServicioTipo    @default(MATRICULA)
