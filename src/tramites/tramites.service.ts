@@ -1803,6 +1803,7 @@ export class TramitesService {
     const fontBold = await out.embedFont(StandardFonts.HelveticaBold);
     const black = rgb(0, 0, 0);
     const white = rgb(1, 1, 1);
+    const paperWhite = rgb(0.96, 0.96, 0.96);
 
     const topToY = (topY: number, fontSize: number) => height - topY - fontSize + 1;
     const fitText = (
@@ -1859,7 +1860,16 @@ export class TramitesService {
       topY: number,
       cellX: number,
       cellWidth: number,
-      opts: { font?: import('pdf-lib').PDFFont; size?: number; maxWidth?: number; minSize?: number } = {},
+      opts: {
+        font?: import('pdf-lib').PDFFont;
+        size?: number;
+        maxWidth?: number;
+        minSize?: number;
+        eraseBackground?: boolean;
+        erasePadX?: number;
+        erasePadTop?: number;
+        erasePadBottom?: number;
+      } = {},
     ) => {
       if (!text) return;
       const font = opts.font ?? fontRegular;
@@ -1867,9 +1877,24 @@ export class TramitesService {
       const maxWidth = opts.maxWidth ?? cellWidth;
       const minSize = opts.minSize ?? 7;
       const fitted = fitText(text, font, size, maxWidth, minSize);
+      const x = cellX + Math.max(0, (cellWidth - fitted.width) / 2);
+      const y = topToY(topY, fitted.size);
+      if (opts.eraseBackground) {
+        const padX = opts.erasePadX ?? 4;
+        const padTop = opts.erasePadTop ?? 1.5;
+        const padBottom = opts.erasePadBottom ?? 1.5;
+        pdfPage.drawRectangle({
+          x: x - padX,
+          y: y - padBottom,
+          width: fitted.width + padX * 2,
+          height: fitted.size + padTop + padBottom,
+          color: paperWhite,
+          borderWidth: 0,
+        });
+      }
       pdfPage.drawText(fitted.text, {
-        x: cellX + Math.max(0, (cellWidth - fitted.width) / 2),
-        y: topToY(topY, fitted.size),
+        x,
+        y,
         size: fitted.size,
         font,
         color: black,
@@ -1887,8 +1912,7 @@ export class TramitesService {
       });
     };
 
-    const drawMoneyRow = (topY: number, value: number, opts: { size?: number; clearH?: number } = {}) => {
-      eraseTopRect(358, topY - 1.5, 148, opts.clearH ?? 16.5);
+    const drawMoneyRow = (topY: number, value: number, opts: { size?: number } = {}) => {
       drawRightTop(`$ ${this.formatCuentaCobroMoney(value)}`, topY, CUENTA_COBRO_PDF_COORDS.tableValueRightX, {
         font: fontBold,
         size: opts.size ?? 10.5,
@@ -1897,14 +1921,17 @@ export class TramitesService {
       });
     };
 
-    const drawYearRow = (topY: number, year: number | null) => {
-      eraseTopRect(CUENTA_COBRO_PDF_COORDS.tableYearCellX, topY - 1.5, CUENTA_COBRO_PDF_COORDS.tableYearCellWidth, 16.5);
+    const drawYearRow = (topY: number, year: number | null, opts: { clearTemplateText?: boolean } = {}) => {
       if (!year) return;
       drawCenterTop(String(year), topY, CUENTA_COBRO_PDF_COORDS.tableYearCellX, CUENTA_COBRO_PDF_COORDS.tableYearCellWidth, {
         font: fontBold,
         size: 10,
         maxWidth: CUENTA_COBRO_PDF_COORDS.tableYearCellWidth - 6,
         minSize: 8,
+        eraseBackground: opts.clearTemplateText,
+        erasePadX: 5,
+        erasePadTop: 1.5,
+        erasePadBottom: 1.0,
       });
     };
 
@@ -1931,19 +1958,29 @@ export class TramitesService {
 
     // Concept row "Traspaso" -> servicio real
     const servicioPrincipal = state.conceptos.find((c) => c.key === 'SERVICIO_PRINCIPAL');
-    eraseTopRect(CUENTA_COBRO_PDF_COORDS.tableConceptCellX, 361.0, CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth, 17);
     drawCenterTop(
       (servicioPrincipal?.label ?? state.servicio.nombre_pdf ?? state.servicio.nombre ?? 'Traspaso').toUpperCase(),
       362.8,
       CUENTA_COBRO_PDF_COORDS.tableConceptCellX,
       CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth,
-      { font: fontBold, size: 10, maxWidth: CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth - 8, minSize: 7 },
+      {
+        font: fontBold,
+        size: 10,
+        maxWidth: CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth - 12,
+        minSize: 7,
+        eraseBackground: true,
+        erasePadX: 8,
+        erasePadTop: 1.0,
+        erasePadBottom: 1.0,
+      },
     );
 
     for (const c of state.conceptos) {
       const def = findCuentaCobroConcept(c.key);
       if (!def) continue;
-      if (def.yearTop !== undefined) drawYearRow(def.yearTop, c.anio);
+      if (def.yearTop !== undefined) {
+        drawYearRow(def.yearTop, c.anio, { clearTemplateText: c.key === 'IMPUESTO_TIMBRE' });
+      }
       if (def.valueTop !== undefined) drawMoneyRow(def.valueTop, c.amount_total);
       if (def.has4x1000 && def.value4xTop !== undefined) drawMoneyRow(def.value4xTop, c.amount_4x1000);
     }
