@@ -4,6 +4,7 @@ import { TramitesController } from './tramites.controller';
 
 @Module({
   providers: [TramitesService],
-  controllers: [TramitesController]
+  controllers: [TramitesController],
+  exports: [TramitesService],
 })
 export class TramitesModule {}

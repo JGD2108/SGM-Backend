@@ -1,6 +1,10 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, Get, Param, Patch, Post, Put, Query, Req, Res, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import type { Response } from 'express';
 import { JwtAuthGuard } from '../common/guards/jwt.guard';
+import { TramitesService } from '../tramites/tramites.service';
+import { SaveCuentaCobroPagosDto } from '../tramites/dto/save-cuenta-cobro-pagos.dto';
+import { SetCuentaCobroHonorariosDto } from '../tramites/dto/set-cuenta-cobro-honorarios.dto';
 import { ServiciosService } from './servicios.service';
 import { CreateServicioDto } from './dto/create-servicio.dto';
 import { ChangeServicioEstadoDto } from './dto/change-servicio-estado.dto';
@@ -13,7 +17,10 @@ import { PatchServicioDto } from './dto/patch-servicio.dto';
 @UseGuards(JwtAuthGuard)
 @Controller('servicios')
 export class ServiciosController {
-  constructor(private readonly service: ServiciosService) {}
+  constructor(
+    private readonly service: ServiciosService,
+    private readonly tramitesService: TramitesService,
+  ) {}
 
   @Get('templates')
   templates() {
@@ -68,5 +75,38 @@ export class ServiciosController {
   @Get(':id/pagos')
   async listPagos(@Param('id') id: string) {
     return this.service.listPagos(id);
+  }
+
+  @Get(':id/cuenta-cobro')
+  async cuentaCobroData(@Param('id') id: string) {
+    return this.tramitesService.cuentaCobroData(id);
+  }
+
+  @Get(':id/cuenta-cobro/resumen')
+  async cuentaCobroResumen(@Param('id') id: string) {
+    return this.tramitesService.cuentaCobroResumen(id);
+  }
+
+  @Put(':id/cuenta-cobro/pagos')
+  async saveCuentaCobroPagos(
+    @Param('id') id: string,
+    @Body() dto: SaveCuentaCobroPagosDto,
+    @Req() req: any,
+  ) {
+    return this.tramitesService.saveCuentaCobroPagos(id, dto, req.user.id);
+  }
+
+  @Patch(':id/cuenta-cobro/honorarios')
+  async setCuentaCobroHonorarios(
+    @Param('id') id: string,
+    @Body() dto: SetCuentaCobroHonorariosDto,
+    @Req() req: any,
+  ) {
+    return this.tramitesService.setCuentaCobroHonorarios(id, dto.honorarios, req.user.id);
+  }
+
+  @Get(':id/cuenta-cobro.pdf')
+  async cuentaCobroPdf(@Param('id') id: string, @Res() res: Response) {
+    return this.tramitesService.cuentaCobroPdf(id, res);
   }
 }
