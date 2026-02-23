@@ -164,6 +164,8 @@ model Tramite {
   estadoActual TramiteEstado @default(FACTURA_RECIBIDA)
 
   honorariosValor Decimal? @db.Decimal(14, 2)
+  cuentaCobroConcepto String?
+  cuentaCobroValor    Decimal? @db.Decimal(14, 2)
 
   // NUEVO: multi-servicios
   tipoServicio   ServicioTipo    @default(MATRICULA)

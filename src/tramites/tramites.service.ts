@@ -1,16 +1,17 @@
-import { Injectable } from '@nestjs/common';
+﻿import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { StorageService } from '../storage/storage.service';
 import { AppError } from '../common/errors/app-error';
 import { countPdfPages } from '../common/pdf/pdf.utils';
 import { readFile, unlink } from 'fs/promises';
+import * as path from 'path';
 import { CreateTramiteDto } from './dto/create-tramite.dto';
 import { PatchTramiteDto } from './dto/patch-tramite.dto';
 import { UploadTramiteFileDto } from './dto/upload-tramite-file.dto';
 import { Prisma, TramiteEstado, ActionType, ChecklistStatus, ConsecStatus, ServicioTipo } from '@prisma/client';
 import type { Response } from 'express';
-import PDFDocument from 'pdfkit';
+import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
 function pad4(n: number) {
   return n.toString().padStart(4, '0');
@@ -63,18 +64,37 @@ export class TramitesService {
     return (Number.isFinite(mb) ? mb : 20) * 1024 * 1024;
   }
 
+  private cuentaCobroTemplatePath(): string {
+    const configured = this.config.get<string>('CUENTA_COBRO_TEMPLATE_PATH')?.trim();
+    return path.resolve(process.cwd(), configured && configured.length > 0 ? configured : 'templates/CUENTA.pdf');
+  }
+
   private displayId(year: number, concesionarioCode: string, consecutivo: number) {
     return `${year}-${concesionarioCode}-${pad4(consecutivo)}`;
   }
 
-  // ✅ /tramites es SOLO MATRÍCULAS
+  private cuentaCobroDisplayId(year: number, concesionarioCode: string, consecutivo: number) {
+    return `${String(consecutivo).padStart(3, '0')} -${concesionarioCode}-${year}`;
+  }
+
+  private formatCuentaCobroDate(d: Date) {
+    const months = ['ene.', 'feb.', 'mar.', 'abr.', 'may.', 'jun.', 'jul.', 'ago.', 'sep.', 'oct.', 'nov.', 'dic.'];
+    return `${String(d.getDate()).padStart(2, '0')}-${months[d.getMonth()]}-${d.getFullYear()}`;
+  }
+
+  private formatCuentaCobroMoney(value: number) {
+    const n = Number.isFinite(value) ? value : 0;
+    return Math.round(n).toLocaleString('es-CO');
+  }
+
+  // âœ… /tramites es SOLO MATRÃCULAS
   private assertIsMatricula(tramite: { tipoServicio?: any }) {
     const tipo = (tramite as any).tipoServicio;
-    // Si es null/undefined lo tratamos como matrícula (compatibilidad si había datos viejos)
+    // Si es null/undefined lo tratamos como matrÃ­cula (compatibilidad si habÃ­a datos viejos)
     if (tipo && tipo !== ServicioTipo.MATRICULA) {
       throw new AppError(
         'NOT_MATRICULA',
-        'Este registro no es una matrícula. Usa /servicios.',
+        'Este registro no es una matrÃ­cula. Usa /servicios.',
         { tipo_servicio: tipo },
         400,
       );
@@ -83,22 +103,22 @@ export class TramitesService {
 
   private assertNotFinalized(tramite: { estadoActual: TramiteEstado }) {
     if (tramite.estadoActual === 'FINALIZADO_ENTREGADO') {
-      throw new AppError('FINALIZED_LOCK', 'El trámite está finalizado. Debes reabrir para editar.', {}, 409);
+      throw new AppError('FINALIZED_LOCK', 'El trÃ¡mite estÃ¡ finalizado. Debes reabrir para editar.', {}, 409);
     }
   }
 
   private assertNotCanceled(tramite: { estadoActual: TramiteEstado }) {
     if (tramite.estadoActual === 'CANCELADO') {
-      throw new AppError('CANCELED_LOCK', 'El trámite está cancelado. No se puede modificar.', {}, 409);
+      throw new AppError('CANCELED_LOCK', 'El trÃ¡mite estÃ¡ cancelado. No se puede modificar.', {}, 409);
     }
   }
 
-  // ✅ Nuevo: lock único para cambio de estado (según tu regla nueva)
+  // âœ… Nuevo: lock Ãºnico para cambio de estado (segÃºn tu regla nueva)
   private assertNotLockedForEstadoChange(tramite: { estadoActual: TramiteEstado }) {
     if (tramite.estadoActual === 'FINALIZADO_ENTREGADO' || tramite.estadoActual === 'CANCELADO') {
       throw new AppError(
         'TRAMITE_LOCKED',
-        'El trámite está finalizado o cancelado. No se puede modificar.',
+        'El trÃ¡mite estÃ¡ finalizado o cancelado. No se puede modificar.',
         { estado_actual: tramite.estadoActual },
         409,
       );
@@ -269,12 +289,12 @@ export class TramitesService {
     const pageCount = await countPdfPages(buffer);
     const max = this.maxPdfPages();
     if (pageCount > max) {
-      throw new AppError('PDF_TOO_MANY_PAGES', `El PDF excede ${max} páginas.`, { pageCount, max }, 422);
+      throw new AppError('PDF_TOO_MANY_PAGES', `El PDF excede ${max} pÃ¡ginas.`, { pageCount, max }, 422);
     }
     return pageCount;
   }
 
-  // ✅ Reserva el menor libre. Si hay choque, reintenta.
+  // âœ… Reserva el menor libre. Si hay choque, reintenta.
   private async getUploadBuffer(file: Express.Multer.File | undefined, field: string): Promise<Buffer> {
     if (!file) {
       throw new AppError('VALIDATION_ERROR', 'Archivo obligatorio.', { field }, 400);
@@ -319,7 +339,7 @@ export class TramitesService {
         );
       } catch (e: any) {
         if (attempt === maxRetries) throw e;
-        // reintento por conflicto/serialización
+        // reintento por conflicto/serializaciÃ³n
       }
     }
 
@@ -343,33 +363,33 @@ export class TramitesService {
     const facturaBuffer = await this.getUploadBuffer(facturaFile, 'factura');
     const pageCount = await this.validatePdfOrThrow(facturaBuffer);
 
-    // catálogos
+    // catÃ¡logos
     const concesionario = await this.prisma.concesionario.findUnique({
       where: { code: dto.concesionarioCode },
     });
     if (!concesionario) {
-      throw new AppError('VALIDATION_ERROR', 'Concesionario inválido.', { concesionarioCode: dto.concesionarioCode }, 400);
+      throw new AppError('VALIDATION_ERROR', 'Concesionario invÃ¡lido.', { concesionarioCode: dto.concesionarioCode }, 400);
     }
 
     const ciudad = await this.prisma.ciudad.findUnique({ where: { name: dto.ciudad } });
     if (!ciudad) {
-      throw new AppError('VALIDATION_ERROR', 'Ciudad inválida.', { ciudad: dto.ciudad }, 400);
+      throw new AppError('VALIDATION_ERROR', 'Ciudad invÃ¡lida.', { ciudad: dto.ciudad }, 400);
     }
 
     const year = new Date().getFullYear();
 
-    // 1) Reservar consecutivo (transacción)
+    // 1) Reservar consecutivo (transacciÃ³n)
     const reserva = await this.reserveNextConsecutivo(concesionario.id, year);
     const consecutivo = reserva.consecutivo;
 
-    // 2) Escribir factura al disco ANTES de crear el trámite (para evitar trámite sin PDF)
+    // 2) Escribir factura al disco ANTES de crear el trÃ¡mite (para evitar trÃ¡mite sin PDF)
     const filename = `FACTURA_v1.pdf`;
     const storagePath = this.storage.buildRelativePath(year, concesionario.code, consecutivo, filename);
 
     try {
       await this.storage.writeFile(storagePath, facturaBuffer);
 
-      // 3) Crear trámite + checklist + file record + historial y amarrar reserva
+      // 3) Crear trÃ¡mite + checklist + file record + historial y amarrar reserva
       const result = await this.prisma.$transaction(async (tx) => {
         // cliente (no es unique, entonces hacemos findFirst)
         let cliente = await tx.cliente.findFirst({ where: { doc: dto.clienteDoc } });
@@ -378,7 +398,7 @@ export class TramitesService {
             data: { doc: dto.clienteDoc, nombre: dto.clienteNombre },
           });
         } else {
-          // opcional: actualiza nombre si cambió
+          // opcional: actualiza nombre si cambiÃ³
           if (cliente.nombre !== dto.clienteNombre) {
             cliente = await tx.cliente.update({
               where: { id: cliente.id },
@@ -396,18 +416,18 @@ export class TramitesService {
             ciudadId: ciudad.id,
             clienteId: cliente.id,
 
-            // ✅ regla nueva: placa NO existe al crear
+            // âœ… regla nueva: placa NO existe al crear
             placa: null,
             estadoActual: 'FACTURA_RECIBIDA',
 
-            // ✅ IMPORTANTE: esto es matrícula
+            // âœ… IMPORTANTE: esto es matrÃ­cula
             tipoServicio: ServicioTipo.MATRICULA,
             estadoServicio: null,
             createdById: userId,
           },
         });
 
-        // amarrar reserva al trámite
+        // amarrar reserva al trÃ¡mite
         await tx.consecutivoReserva.update({
           where: { id: reserva.id },
           data: { tramiteId: tramite.id, status: 'RESERVADO' },
@@ -451,7 +471,7 @@ export class TramitesService {
             fromEstado: null,
             toEstado: 'FACTURA_RECIBIDA',
             changedById: userId,
-            notes: 'Creación de trámite con factura.',
+            notes: 'CreaciÃ³n de trÃ¡mite con factura.',
             actionType: 'NORMAL',
           },
         });
@@ -467,7 +487,7 @@ export class TramitesService {
         consecutivo,
       };
     } catch (e) {
-      // compensación si algo falla
+      // compensaciÃ³n si algo falla
       await this.storage.deleteFileIfExists(storagePath);
       await this.prisma.consecutivoReserva.updateMany({
         where: { id: reserva.id, status: 'RESERVADO' },
@@ -490,7 +510,7 @@ export class TramitesService {
     const includeCancelados = String(query.includeCancelados ?? 'false') === 'true';
 
     const where: Prisma.TramiteWhereInput = {
-      // ✅ /tramites = SOLO MATRÍCULAS
+      // âœ… /tramites = SOLO MATRÃCULAS
       tipoServicio: ServicioTipo.MATRICULA,
     };
 
@@ -594,10 +614,10 @@ export class TramitesService {
       },
     });
 
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
-    // is_atrasado (mismo cálculo pero por 1 trámite)
+    // is_atrasado (mismo cÃ¡lculo pero por 1 trÃ¡mite)
     const rules = await this.prisma.alertRule.findMany({ where: { isActive: true } });
     const events = await this.prisma.tramiteEstadoHist.findMany({
       where: { tramiteId: id },
@@ -625,6 +645,7 @@ export class TramitesService {
     const total_empresa = total_pagos + total_envios;
 
     const honorarios = Number((t as any).honorariosValor ?? 0);
+    const cuenta_cobro_valor = t.cuentaCobroValor == null ? null : Number((t as any).cuentaCobroValor);
     const total_final = total_empresa + honorarios;
 
     return {
@@ -645,6 +666,8 @@ export class TramitesService {
       total_envios,
       total_empresa,
       honorarios_valor: honorarios,
+      cuenta_cobro_concepto: t.cuentaCobroConcepto ?? null,
+      cuenta_cobro_valor,
       total_final,
     };
   }
@@ -657,19 +680,19 @@ export class TramitesService {
       where: { id },
       include: { concesionario: true, ciudad: true },
     });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     this.assertNotCanceled(t);
     this.assertNotFinalized(t);
 
-    // ✅ honorarios (si viene)
+    // âœ… honorarios (si viene)
     const honorariosParsed = this.parseMoney((dto as any).honorariosValor);
     if (honorariosParsed !== null) {
       if (!Number.isFinite(honorariosParsed)) {
         throw new AppError(
           'VALIDATION_ERROR',
-          'honorariosValor inválido.',
+          'honorariosValor invÃ¡lido.',
           { honorariosValor: (dto as any).honorariosValor },
           400,
         );
@@ -684,17 +707,44 @@ export class TramitesService {
       }
     }
 
+    const cuentaCobroValorParsed = this.parseMoney((dto as any).cuentaCobroValor);
+    if (cuentaCobroValorParsed !== null) {
+      if (!Number.isFinite(cuentaCobroValorParsed)) {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          'cuentaCobroValor invÃ¡lido.',
+          { cuentaCobroValor: (dto as any).cuentaCobroValor },
+          400,
+        );
+      }
+      if (cuentaCobroValorParsed < 0) {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          'cuentaCobroValor no puede ser negativo.',
+          { cuentaCobroValor: cuentaCobroValorParsed },
+          400,
+        );
+      }
+    }
+
+    const cuentaCobroConceptoNormalized =
+      dto.cuentaCobroConcepto === undefined
+        ? undefined
+        : dto.cuentaCobroConcepto == null
+          ? null
+          : (dto.cuentaCobroConcepto.trim() || null);
+
     let ciudadId = t.ciudadId;
     if (dto.ciudad) {
       const ciudad = await this.prisma.ciudad.findUnique({ where: { name: dto.ciudad } });
-      if (!ciudad) throw new AppError('VALIDATION_ERROR', 'Ciudad inválida.', { ciudad: dto.ciudad }, 400);
+      if (!ciudad) throw new AppError('VALIDATION_ERROR', 'Ciudad invÃ¡lida.', { ciudad: dto.ciudad }, 400);
       ciudadId = ciudad.id;
     }
 
     // Cambio de concesionario (reasigna consecutivo y guarda anterior)
     if (dto.concesionarioCode && dto.concesionarioCode !== t.concesionarioCodeSnapshot) {
       const nuevo = await this.prisma.concesionario.findUnique({ where: { code: dto.concesionarioCode } });
-      if (!nuevo) throw new AppError('VALIDATION_ERROR', 'Concesionario inválido.', { concesionarioCode: dto.concesionarioCode }, 400);
+      if (!nuevo) throw new AppError('VALIDATION_ERROR', 'Concesionario invÃ¡lido.', { concesionarioCode: dto.concesionarioCode }, 400);
 
       const reservaNueva = await this.reserveNextConsecutivo(nuevo.id, t.year);
 
@@ -721,9 +771,13 @@ export class TramitesService {
             consecutivo: reservaNueva.consecutivo,
             ciudadId,
 
-            // ✅ placa no se cambia por PATCH (regla nueva)
+            // âœ… placa no se cambia por PATCH (regla nueva)
 
             ...(honorariosParsed !== null ? { honorariosValor: honorariosParsed as any } : {}),
+            ...(cuentaCobroConceptoNormalized !== undefined
+              ? { cuentaCobroConcepto: cuentaCobroConceptoNormalized }
+              : {}),
+            ...(cuentaCobroValorParsed !== null ? { cuentaCobroValor: cuentaCobroValorParsed as any } : {}),
           },
         });
 
@@ -749,6 +803,10 @@ export class TramitesService {
       data: {
         ciudadId,
         ...(honorariosParsed !== null ? { honorariosValor: honorariosParsed as any } : {}),
+        ...(cuentaCobroConceptoNormalized !== undefined
+          ? { cuentaCobroConcepto: cuentaCobroConceptoNormalized }
+          : {}),
+        ...(cuentaCobroValorParsed !== null ? { cuentaCobroValor: cuentaCobroValorParsed as any } : {}),
       },
     });
 
@@ -760,7 +818,7 @@ export class TramitesService {
   // ==========================
   async historial(id: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     const rows = await this.prisma.tramiteEstadoHist.findMany({
@@ -780,7 +838,7 @@ export class TramitesService {
     }));
   }
 
-  // ✅ CAMBIO PRINCIPAL: ahora soporta placa atómica por estado
+  // âœ… CAMBIO PRINCIPAL: ahora soporta placa atÃ³mica por estado
   async changeEstado(
     id: string,
     toEstadoRaw: any,
@@ -789,7 +847,7 @@ export class TramitesService {
     placa?: string,
   ) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     // lock (finalizado/cancelado)
@@ -799,10 +857,10 @@ export class TramitesService {
     const toEstado = String(toEstadoRaw) as TramiteEstado;
     const validStates = Object.values(TramiteEstado) as string[];
     if (!validStates.includes(toEstado)) {
-      throw new AppError('INVALID_STATE', 'Estado inválido.', { toEstado }, 400);
+      throw new AppError('INVALID_STATE', 'Estado invÃ¡lido.', { toEstado }, 400);
     }
 
-    // validación por estado: placa obligatoria en PLACA_ASIGNADA
+    // validaciÃ³n por estado: placa obligatoria en PLACA_ASIGNADA
     let placaNormalized: string | undefined = undefined;
 
     if (toEstado === 'PLACA_ASIGNADA') {
@@ -843,13 +901,13 @@ export class TramitesService {
 
   async finalizar(id: string, userId: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     this.assertNotCanceled(t);
 
     if (t.estadoActual === 'FINALIZADO_ENTREGADO') {
-      throw new AppError('CONFLICT', 'Ya está finalizado.', {}, 409);
+      throw new AppError('CONFLICT', 'Ya estÃ¡ finalizado.', {}, 409);
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -875,11 +933,11 @@ export class TramitesService {
 
   async cancelar(id: string, reason: string | undefined, userId: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     if (t.estadoActual === 'CANCELADO') {
-      throw new AppError('CONFLICT', 'Ya está cancelado.', {}, 409);
+      throw new AppError('CONFLICT', 'Ya estÃ¡ cancelado.', {}, 409);
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -910,13 +968,13 @@ export class TramitesService {
 
   async reabrir(id: string, reason: string, toEstado: TramiteEstado | undefined, userId: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     this.assertNotCanceled(t);
 
     if (t.estadoActual !== 'FINALIZADO_ENTREGADO') {
-      throw new AppError('CONFLICT', 'Solo se puede reabrir si está finalizado.', {}, 409);
+      throw new AppError('CONFLICT', 'Solo se puede reabrir si estÃ¡ finalizado.', {}, 409);
     }
 
     const target: TramiteEstado = toEstado ?? 'DOCS_FISICOS_PENDIENTES';
@@ -947,7 +1005,7 @@ export class TramitesService {
   // ==========================
   async checklist(id: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
     await this.ensureFlexibleChecklistItem(id);
 
@@ -972,7 +1030,7 @@ export class TramitesService {
   // ==========================
   async listFiles(id: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     const files = await this.prisma.tramiteFile.findMany({
@@ -1008,7 +1066,7 @@ export class TramitesService {
     }
 
     const tramite = await this.prisma.tramite.findUnique({ where: { id: tramiteId } });
-    if (!tramite) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id: tramiteId }, 404);
+    if (!tramite) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id: tramiteId }, 404);
     this.assertIsMatricula(tramite);
 
     this.assertNotCanceled(tramite);
@@ -1088,7 +1146,7 @@ export class TramitesService {
     const tramites = await this.prisma.tramite.findMany({
       where: {
         estadoActual: { not: 'CANCELADO' },
-        // ✅ SOLO MATRÍCULAS
+        // âœ… SOLO MATRÃCULAS
         tipoServicio: ServicioTipo.MATRICULA,
       },
       include: {
@@ -1133,7 +1191,7 @@ export class TramitesService {
         const daysLate = days - r.thresholdDays;
 
         if (daysLate > 0) {
-          const text = `${r.fromEstado} -> ${r.toEstado} > ${r.thresholdDays} días`;
+          const text = `${r.fromEstado} -> ${r.toEstado} > ${r.thresholdDays} dÃ­as`;
           if (!worst || daysLate > worst.daysLate) worst = { ruleText: text, daysLate };
         }
       }
@@ -1167,22 +1225,151 @@ export class TramitesService {
     const t = await this.prisma.tramite.findUnique({
       where: { id: tramiteId },
       include: {
+        concesionario: { select: { name: true } },
         ciudad: { select: { name: true } },
         cliente: { select: { nombre: true, doc: true } },
-        payments: true,
-        shipmentLinks: { include: { shipment: true } },
       },
     });
 
     if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id: tramiteId }, 404);
     this.assertIsMatricula(t);
 
-    const totalPagos = t.payments.reduce((acc, p) => acc + p.valor, 0);
-    const totalEnvios = t.shipmentLinks.reduce((acc, l) => acc + l.shipment.costo, 0);
-    const subtotalEmpresa = totalPagos + totalEnvios;
+    const templatePath = this.cuentaCobroTemplatePath();
+    let templateBytes: Buffer;
+    try {
+      templateBytes = await readFile(templatePath);
+    } catch {
+      throw new AppError(
+        'CUENTA_COBRO_TEMPLATE_NOT_FOUND',
+        'No se encontró la plantilla de cuenta de cobro.',
+        { templatePath },
+        500,
+      );
+    }
 
-    const honorarios = Number((t as any).honorariosValor ?? 0);
-    const totalFinal = subtotalEmpresa + honorarios;
+    const template = await PDFDocument.load(templateBytes, { ignoreEncryption: true });
+    if (template.getPageCount() < 1) {
+      throw new AppError('CUENTA_COBRO_TEMPLATE_INVALID', 'La plantilla de cuenta de cobro no tiene páginas.', {}, 500);
+    }
+
+    const out = await PDFDocument.create();
+    const [page] = await out.copyPages(template, [0]); // solo página 1
+    out.addPage(page);
+
+    const pdfPage = out.getPage(0);
+    const { height } = pdfPage.getSize();
+    const fontRegular = await out.embedFont(StandardFonts.Helvetica);
+    const fontBold = await out.embedFont(StandardFonts.HelveticaBold);
+    const black = rgb(0, 0, 0);
+    const white = rgb(1, 1, 1);
+
+    const topToY = (topY: number, fontSize: number) => height - topY - fontSize + 1;
+    const fitText = (
+      text: string,
+      font: import('pdf-lib').PDFFont,
+      preferredSize: number,
+      maxWidth: number,
+      minSize: number,
+    ) => {
+      let size = preferredSize;
+      let value = text;
+      let width = font.widthOfTextAtSize(value, size);
+
+      while (size > minSize && width > maxWidth) {
+        size -= 0.5;
+        width = font.widthOfTextAtSize(value, size);
+      }
+
+      if (width > maxWidth) {
+        let trimmed = value;
+        while (trimmed.length > 0 && font.widthOfTextAtSize(`${trimmed}...`, size) > maxWidth) {
+          trimmed = trimmed.slice(0, -1);
+        }
+        value = trimmed.length > 0 ? `${trimmed}...` : '';
+        width = font.widthOfTextAtSize(value, size);
+      }
+
+      return { text: value, size, width };
+    };
+
+    const drawRightTop = (
+      text: string,
+      topY: number,
+      rightX: number,
+      opts: { font?: import('pdf-lib').PDFFont; size?: number; maxWidth?: number; minSize?: number } = {},
+    ) => {
+      if (!text) return;
+      const font = opts.font ?? fontRegular;
+      const size = opts.size ?? 10;
+      const maxWidth = opts.maxWidth ?? 200;
+      const minSize = opts.minSize ?? 7;
+      const fitted = fitText(text, font, size, maxWidth, minSize);
+      pdfPage.drawText(fitted.text, {
+        x: rightX - fitted.width,
+        y: topToY(topY, fitted.size),
+        size: fitted.size,
+        font,
+        color: black,
+      });
+    };
+
+    const drawCenterTop = (
+      text: string,
+      topY: number,
+      cellX: number,
+      cellWidth: number,
+      opts: { font?: import('pdf-lib').PDFFont; size?: number; maxWidth?: number; minSize?: number } = {},
+    ) => {
+      if (!text) return;
+      const font = opts.font ?? fontRegular;
+      const size = opts.size ?? 10;
+      const maxWidth = opts.maxWidth ?? cellWidth;
+      const minSize = opts.minSize ?? 7;
+      const fitted = fitText(text, font, size, maxWidth, minSize);
+      pdfPage.drawText(fitted.text, {
+        x: cellX + Math.max(0, (cellWidth - fitted.width) / 2),
+        y: topToY(topY, fitted.size),
+        size: fitted.size,
+        font,
+        color: black,
+      });
+    };
+
+    const eraseTopRect = (x: number, topY: number, width: number, rectHeight: number) => {
+      pdfPage.drawRectangle({
+        x,
+        y: height - topY - rectHeight,
+        width,
+        height: rectHeight,
+        color: white,
+        borderWidth: 0,
+      });
+    };
+
+    const cuentaId = this.cuentaCobroDisplayId(t.year, t.concesionarioCodeSnapshot, t.consecutivo);
+    const fecha = this.formatCuentaCobroDate(new Date());
+    const clienteNombre = (t.cliente.nombre ?? '').trim().toUpperCase();
+    const clienteDoc = (t.cliente.doc ?? '').trim();
+    const placa = (t.placa ?? '').trim().toUpperCase();
+    const ciudad = (t.ciudad.name ?? '').trim().toUpperCase();
+    const concesionario = (t.concesionario?.name ?? t.concesionarioCodeSnapshot ?? '').trim().toUpperCase();
+    const concepto = (t.cuentaCobroConcepto?.trim() || 'Traspaso').toUpperCase();
+    const valorTramite = Number((t as any).cuentaCobroValor ?? (t as any).honorariosValor ?? 0);
+    const valorTexto = `$ ${this.formatCuentaCobroMoney(valorTramite)}`;
+
+    const headerRightX = 488;
+    drawRightTop(cuentaId, 55.5, headerRightX, { font: fontBold, size: 11, maxWidth: 170, minSize: 8 });
+    drawRightTop(fecha, 70.4, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 8 });
+    drawRightTop(clienteNombre, 86.8, headerRightX, { font: fontBold, size: 8.5, maxWidth: 170, minSize: 6.5 });
+    drawRightTop(clienteDoc, 103.0, headerRightX, { font: fontBold, size: 8.5, maxWidth: 145, minSize: 7 });
+    drawRightTop(placa, 117.3, headerRightX, { font: fontBold, size: 10, maxWidth: 120, minSize: 8 });
+    drawRightTop(ciudad, 131.8, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 7 });
+    drawRightTop(concesionario, 146.4, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 7 });
+
+    // La plantilla trae "Traspaso" preimpreso: se cubre y se reemplaza.
+    eraseTopRect(50, 361.5, 184, 15.5);
+    drawCenterTop(concepto, 362.8, 50, 184, { font: fontBold, size: 10, maxWidth: 176, minSize: 7 });
+    drawRightTop(valorTexto, 362.8, 505, { font: fontBold, size: 10.5, maxWidth: 140, minSize: 8 });
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
@@ -1190,35 +1377,7 @@ export class TramitesService {
       `attachment; filename="cuenta-cobro-${t.year}-${t.concesionarioCodeSnapshot}-${String(t.consecutivo).padStart(4, '0')}.pdf"`,
     );
 
-    const doc = new PDFDocument({ size: 'LETTER', margin: 50 });
-    doc.pipe(res);
-
-    doc.fontSize(18).text('Cuenta de cobro', { align: 'center' });
-    doc.moveDown();
-
-    const displayId = `${t.year}-${t.concesionarioCodeSnapshot}-${String(t.consecutivo).padStart(4, '0')}`;
-    doc.fontSize(12).text(`Trámite: ${displayId}`);
-    doc.text(`Cliente: ${t.cliente.nombre} (${t.cliente.doc})`);
-    doc.text(`Ciudad: ${t.ciudad.name}`);
-    doc.text(`Estado: ${t.estadoActual}`);
-    doc.moveDown();
-
-    doc.fontSize(14).text('Detalle de costos');
-    doc.moveDown(0.5);
-
-    doc.fontSize(12).text(`Pagos registrados: $${totalPagos.toLocaleString('es-CO')}`);
-    doc.text(`Envíos (guías): $${totalEnvios.toLocaleString('es-CO')}`);
-    doc.moveDown();
-
-    doc.fontSize(12).text(`Subtotal empresa: $${subtotalEmpresa.toLocaleString('es-CO')}`);
-    doc.text(`Honorarios: $${honorarios.toLocaleString('es-CO')}`);
-    doc.moveDown();
-
-    doc.fontSize(14).text(`TOTAL FINAL: $${totalFinal.toLocaleString('es-CO')}`, { underline: true });
-    doc.moveDown();
-
-    doc.fontSize(10).text(`Generado: ${new Date().toISOString().slice(0, 10)}`);
-
-    doc.end();
+    const outputBytes = await out.save();
+    res.end(Buffer.from(outputBytes));
   }
 }

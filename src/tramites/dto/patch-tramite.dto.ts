@@ -12,4 +12,10 @@ export class PatchTramiteDto {
 
   @IsOptional()
   honorariosValor?: number | string;
+
+  @IsString() @IsOptional()
+  cuentaCobroConcepto?: string;
+
+  @IsOptional()
+  cuentaCobroValor?: number | string;
 }
