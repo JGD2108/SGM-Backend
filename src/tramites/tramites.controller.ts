@@ -5,6 +5,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
   Req,
   Res,
@@ -27,6 +28,8 @@ import { ChangeEstadoDto } from './dto/change-estado.dto';
 import { CreateTramiteDto } from './dto/create-tramite.dto';
 import { PatchTramiteDto } from './dto/patch-tramite.dto';
 import { ReabrirDto } from './dto/reabrir.dto';
+import { SaveCuentaCobroPagosDto } from './dto/save-cuenta-cobro-pagos.dto';
+import { SetCuentaCobroHonorariosDto } from './dto/set-cuenta-cobro-honorarios.dto';
 import { UploadTramiteFileDto } from './dto/upload-tramite-file.dto';
 
 const TMP_UPLOAD_DIR = path.join(os.tmpdir(), 'sgm-uploads');
@@ -159,6 +162,34 @@ export class TramitesController {
     @Req() req: any,
   ) {
     return this.service.uploadFile(id, dto, file, req.user.id);
+  }
+
+  @Get(':id/cuenta-cobro')
+  async cuentaCobroData(@Param('id') id: string) {
+    return this.service.cuentaCobroData(id);
+  }
+
+  @Get(':id/cuenta-cobro/resumen')
+  async cuentaCobroResumen(@Param('id') id: string) {
+    return this.service.cuentaCobroResumen(id);
+  }
+
+  @Put(':id/cuenta-cobro/pagos')
+  async saveCuentaCobroPagos(
+    @Param('id') id: string,
+    @Body() dto: SaveCuentaCobroPagosDto,
+    @Req() req: any,
+  ) {
+    return this.service.saveCuentaCobroPagos(id, dto, req.user.id);
+  }
+
+  @Patch(':id/cuenta-cobro/honorarios')
+  async setCuentaCobroHonorarios(
+    @Param('id') id: string,
+    @Body() dto: SetCuentaCobroHonorariosDto,
+    @Req() req: any,
+  ) {
+    return this.service.setCuentaCobroHonorarios(id, dto.honorarios, req.user.id);
   }
 
   @Get(':id/cuenta-cobro.pdf')

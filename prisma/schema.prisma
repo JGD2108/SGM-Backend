@@ -306,6 +306,11 @@ model Payment {
 
   tipo      PaymentTipo
   valor     Int
+  conceptoKey           String?
+  conceptoLabelSnapshot String?
+  anio                  Int?
+  amountTotal           Int?
+  amount4x1000          Int?
   fecha     DateTime
   medioPago MedioPago
   notes     String?

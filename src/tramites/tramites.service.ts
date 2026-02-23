@@ -6,10 +6,25 @@ import { AppError } from '../common/errors/app-error';
 import { countPdfPages } from '../common/pdf/pdf.utils';
 import { readFile, unlink } from 'fs/promises';
 import * as path from 'path';
+import {
+  CUENTA_COBRO_CONCEPTS,
+  CUENTA_COBRO_PDF_COORDS,
+  findCuentaCobroConcept,
+  resolveCuentaCobroServiceName,
+} from './cuenta-cobro.config';
 import { CreateTramiteDto } from './dto/create-tramite.dto';
 import { PatchTramiteDto } from './dto/patch-tramite.dto';
+import { SaveCuentaCobroPagosDto } from './dto/save-cuenta-cobro-pagos.dto';
 import { UploadTramiteFileDto } from './dto/upload-tramite-file.dto';
-import { Prisma, TramiteEstado, ActionType, ChecklistStatus, ConsecStatus, ServicioTipo } from '@prisma/client';
+import {
+  Prisma,
+  TramiteEstado,
+  ActionType,
+  ChecklistStatus,
+  ConsecStatus,
+  ServicioTipo,
+  MedioPago,
+} from '@prisma/client';
 import type { Response } from 'express';
 import { PDFDocument, StandardFonts, rgb } from 'pdf-lib';
 
@@ -43,6 +58,36 @@ const FLEXIBLE_DOC_KEYS = ['OTRO', 'DOCS_FISICOS', 'DOC_FISICO'] as const;
 const FLEXIBLE_DOC_KEY_SET = new Set<string>(FLEXIBLE_DOC_KEYS);
 const FLEXIBLE_DOC_TYPE_PREFERENCE = ['OTRO', 'DOC_FISICO', 'DOCS_FISICOS'] as const;
 const FALLBACK_FLEXIBLE_NAME = 'Otros documentos';
+
+type CuentaCobroTramiteRecord = {
+  id: string;
+  year: number;
+  placa: string | null;
+  tipoServicio: ServicioTipo;
+  serviceData: Prisma.JsonValue | null;
+  estadoActual: TramiteEstado;
+  honorariosValor: Prisma.Decimal | null;
+  cuentaCobroConcepto: string | null;
+  cuentaCobroValor: Prisma.Decimal | null;
+  concesionarioCodeSnapshot: string;
+  consecutivo: number;
+  concesionario: { name: string } | null;
+  ciudad: { name: string };
+  cliente: { nombre: string; doc: string };
+  payments: Array<{
+    id: string;
+    tipo: any;
+    valor: number;
+    fecha: Date;
+    medioPago: any;
+    notes: string | null;
+    conceptoKey: string | null;
+    conceptoLabelSnapshot: string | null;
+    anio: number | null;
+    amountTotal: number | null;
+    amount4x1000: number | null;
+  }>;
+};
 
 @Injectable()
 export class TramitesService {
@@ -85,6 +130,160 @@ export class TramitesService {
   private formatCuentaCobroMoney(value: number) {
     const n = Number.isFinite(value) ? value : 0;
     return Math.round(n).toLocaleString('es-CO');
+  }
+
+  private parseCuentaCobroFecha(value?: string): Date {
+    if (!value || value.trim().length === 0) return new Date();
+    const d = value.includes('T') ? new Date(value) : new Date(`${value}T00:00:00.000Z`);
+    if (Number.isNaN(d.getTime())) {
+      throw new AppError('VALIDATION_ERROR', 'Fecha de pago inválida.', { fecha: value }, 400);
+    }
+    return d;
+  }
+
+  private async getCuentaCobroTramiteOrThrow(id: string): Promise<CuentaCobroTramiteRecord> {
+    const t = (await this.prisma.tramite.findUnique({
+      where: { id },
+      include: {
+        concesionario: { select: { name: true } },
+        ciudad: { select: { name: true } },
+        cliente: { select: { nombre: true, doc: true } },
+        payments: {
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          select: {
+            id: true,
+            tipo: true,
+            valor: true,
+            fecha: true,
+            medioPago: true,
+            notes: true,
+            conceptoKey: true,
+            conceptoLabelSnapshot: true,
+            anio: true,
+            amountTotal: true,
+            amount4x1000: true,
+          },
+        },
+      },
+    })) as CuentaCobroTramiteRecord | null;
+
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    return t;
+  }
+
+  private buildCuentaCobroState(t: CuentaCobroTramiteRecord) {
+    const servicioNombreBd = resolveCuentaCobroServiceName(t.tipoServicio, t.serviceData ?? undefined);
+    const servicioNombrePdf = (t.cuentaCobroConcepto?.trim() || servicioNombreBd).trim();
+
+    const managedPayments = t.payments.filter((p) => !!findCuentaCobroConcept(p.conceptoKey));
+    const legacyPayments = t.payments.filter((p) => !findCuentaCobroConcept(p.conceptoKey));
+
+    const grouped = new Map<
+      string,
+      {
+        amount_total: number;
+        amount_4x1000: number;
+        anio: number | null;
+        last_fecha: Date | null;
+        label_snapshot: string | null;
+        ids: string[];
+      }
+    >();
+
+    for (const p of managedPayments) {
+      const def = findCuentaCobroConcept(p.conceptoKey);
+      if (!def) continue;
+
+      const amount4 = Math.max(0, Number(p.amount4x1000 ?? 0));
+      const amountTotal = Math.max(
+        0,
+        Number(
+          p.amountTotal ??
+            // Compatibilidad si hay filas viejas con solo "valor"
+            Math.max(0, (p.valor ?? 0) - amount4),
+        ),
+      );
+
+      const acc =
+        grouped.get(def.key) ?? {
+          amount_total: 0,
+          amount_4x1000: 0,
+          anio: null,
+          last_fecha: null,
+          label_snapshot: null,
+          ids: [],
+        };
+      acc.amount_total += amountTotal;
+      acc.amount_4x1000 += amount4;
+      acc.anio = p.anio ?? acc.anio ?? t.year;
+      acc.last_fecha = p.fecha ?? acc.last_fecha;
+      acc.label_snapshot = (p.conceptoLabelSnapshot?.trim() || acc.label_snapshot) ?? null;
+      acc.ids.push(p.id);
+      grouped.set(def.key, acc);
+    }
+
+    const conceptos = CUENTA_COBRO_CONCEPTS.map((def) => {
+      const g = grouped.get(def.key);
+      const amount_total = g?.amount_total ?? 0;
+      const amount_4x1000 = g?.amount_4x1000 ?? 0;
+      const anio = def.yearTop !== undefined ? (g?.anio ?? t.year) : null;
+      const label =
+        g?.label_snapshot?.trim() ||
+        (def.key === 'SERVICIO_PRINCIPAL' ? servicioNombrePdf : def.label);
+      return {
+        key: def.key,
+        label,
+        concept_name: label,
+        has4x1000: def.has4x1000,
+        label4x1000: def.label4x1000,
+        anio,
+        year: anio,
+        amount_total,
+        amount_4x1000,
+        total: amount_total + amount_4x1000,
+      };
+    });
+
+    const total_a_reembolsar = conceptos.reduce((acc, c) => acc + c.total, 0);
+    const servicio_por_tramite_valor = Number((t as any).cuentaCobroValor ?? 0);
+    const honorarios = Number((t as any).honorariosValor ?? 0);
+    const total_cuenta_de_cobro = servicio_por_tramite_valor + honorarios;
+    const menos_abono = 0;
+    const mas_total_cuenta_de_cobro = total_cuenta_de_cobro;
+    const total_a_cancelar = total_a_reembolsar + mas_total_cuenta_de_cobro;
+    const saldo_pdte_por_cancelar = total_a_cancelar - menos_abono;
+
+    return {
+      tramite: t,
+      encabezado: {
+        fecha: new Date().toISOString().slice(0, 10),
+        cliente: t.cliente.nombre,
+        nit_o_cc: t.cliente.doc,
+        placas: t.placa ?? '',
+        ciudad: t.ciudad.name,
+        concesionario: t.concesionario?.name ?? t.concesionarioCodeSnapshot,
+      },
+      servicio: {
+        id: t.tipoServicio,
+        nombre: servicioNombreBd,
+        nombre_pdf: servicioNombrePdf,
+        valor: servicio_por_tramite_valor,
+      },
+      conceptos,
+      honorarios,
+      legacy_payments_detected: {
+        count: legacyPayments.length,
+        total: legacyPayments.reduce((acc, p) => acc + p.valor, 0),
+      },
+      totales: {
+        total_a_reembolsar,
+        mas_total_cuenta_de_cobro,
+        total_cuenta_de_cobro,
+        total_a_cancelar,
+        menos_abono,
+        saldo_pdte_por_cancelar,
+      },
+    };
   }
 
   // âœ… /tramites es SOLO MATRÃCULAS
@@ -672,6 +871,173 @@ export class TramitesService {
     };
   }
 
+  async cuentaCobroData(id: string) {
+    const t = await this.getCuentaCobroTramiteOrThrow(id);
+    const state = this.buildCuentaCobroState(t);
+    return {
+      tramite_id: t.id,
+      display_id: this.displayId(t.year, t.concesionarioCodeSnapshot, t.consecutivo),
+      base: {
+        service_id: state.servicio.id,
+        service_name: state.servicio.nombre,
+        service_name_pdf: state.servicio.nombre_pdf,
+        fecha: state.encabezado.fecha,
+        cliente: state.encabezado.cliente,
+        documento: state.encabezado.nit_o_cc,
+        placa: state.encabezado.placas,
+        ciudad: state.encabezado.ciudad,
+        concesionario: state.encabezado.concesionario,
+      },
+      ...state,
+    };
+  }
+
+  async cuentaCobroResumen(id: string) {
+    const t = await this.getCuentaCobroTramiteOrThrow(id);
+    const state = this.buildCuentaCobroState(t);
+    return {
+      tramite_id: t.id,
+      display_id: this.displayId(t.year, t.concesionarioCodeSnapshot, t.consecutivo),
+      servicio: state.servicio,
+      honorarios: state.honorarios,
+      totales: state.totales,
+      legacy_payments_detected: state.legacy_payments_detected,
+    };
+  }
+
+  async saveCuentaCobroPagos(id: string, dto: SaveCuentaCobroPagosDto, userId: string | undefined) {
+    if (!userId) throw new AppError('UNAUTHORIZED', 'No autenticado.', {}, 401);
+
+    const t = await this.prisma.tramite.findUnique({
+      where: { id },
+      include: {
+        concesionario: { select: { name: true } },
+        ciudad: { select: { name: true } },
+        cliente: { select: { nombre: true, doc: true } },
+        payments: { select: { id: true } },
+      },
+    });
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    this.assertNotCanceled(t);
+    this.assertNotFinalized(t);
+
+    if ((dto.items?.length ?? 0) > CUENTA_COBRO_CONCEPTS.length) {
+      throw new AppError(
+        'VALIDATION_ERROR',
+        'La plantilla solo soporta un número limitado de conceptos.',
+        { maxConcepts: CUENTA_COBRO_CONCEPTS.length, received: dto.items?.length ?? 0 },
+        400,
+      );
+    }
+
+    const assignedKeys = new Set<string>();
+    let nextSlotIndex = 0;
+    const normalizedItems = (dto.items ?? []).map((item) => {
+      const explicitKey = item.concepto_key ? String(item.concepto_key).trim().toUpperCase() : undefined;
+      let def = explicitKey ? findCuentaCobroConcept(explicitKey) : undefined;
+      if (explicitKey && !def) {
+        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inválido.', { concepto_key: explicitKey }, 400);
+      }
+
+      if (!def) {
+        while (nextSlotIndex < CUENTA_COBRO_CONCEPTS.length && assignedKeys.has(CUENTA_COBRO_CONCEPTS[nextSlotIndex].key)) {
+          nextSlotIndex++;
+        }
+        def = CUENTA_COBRO_CONCEPTS[nextSlotIndex];
+        if (!def) {
+          throw new AppError(
+            'VALIDATION_ERROR',
+            'No hay más filas disponibles en la plantilla para conceptos.',
+            { maxConcepts: CUENTA_COBRO_CONCEPTS.length },
+            400,
+          );
+        }
+      }
+
+      if (assignedKeys.has(def.key)) {
+        throw new AppError('VALIDATION_ERROR', 'Concepto duplicado en pagos de cuenta de cobro.', { concepto_key: def.key }, 400);
+      }
+      assignedKeys.add(def.key);
+
+      const amountTotal = Math.max(0, Number(item.amount_total ?? 0) || 0);
+      const amount4x1000 = Math.max(0, Number(item.amount_4x1000 ?? 0) || 0);
+      if (!def.has4x1000 && amount4x1000 > 0) {
+        throw new AppError(
+          'VALIDATION_ERROR',
+          'El concepto no permite 4x1000.',
+          { concepto_key: def.key, amount_4x1000: amount4x1000 },
+          400,
+        );
+      }
+
+      const conceptNameRaw = typeof (item as any).concept_name === 'string' ? (item as any).concept_name.trim() : '';
+      return {
+        item,
+        def,
+        amountTotal,
+        amount4x1000,
+        conceptNameRaw,
+      };
+    });
+
+    const servicioNombre = resolveCuentaCobroServiceName(t.tipoServicio, (t as any).serviceData ?? undefined);
+
+    await this.prisma.$transaction(async (tx) => {
+      await tx.payment.deleteMany({
+        where: {
+          tramiteId: id,
+          conceptoKey: { not: null },
+        },
+      });
+
+      for (const row of normalizedItems) {
+        const { item, def, amountTotal, amount4x1000, conceptNameRaw } = row;
+        const rowTotal = amountTotal + amount4x1000;
+        if (rowTotal <= 0) continue;
+
+        const defaultLabel = def.key === 'SERVICIO_PRINCIPAL' ? servicioNombre : def.label;
+        const label = conceptNameRaw || defaultLabel;
+        const inputYear = (item as any).year ?? item.anio;
+        const anio = def.yearTop !== undefined ? Math.max(2000, Number(inputYear ?? t.year ?? new Date().getFullYear())) : null;
+
+        await tx.payment.create({
+          data: {
+            tramiteId: id,
+            tipo: def.paymentTipo,
+            valor: rowTotal,
+            conceptoKey: def.key,
+            conceptoLabelSnapshot: label,
+            anio,
+            amountTotal,
+            amount4x1000,
+            fecha: this.parseCuentaCobroFecha(item.fecha),
+            medioPago: ((item.medio_pago ?? 'OTRO') as MedioPago) ?? 'OTRO',
+            notes: item.notes ?? null,
+            createdById: userId,
+          },
+        });
+      }
+    });
+
+    return this.cuentaCobroData(id);
+  }
+
+  async setCuentaCobroHonorarios(id: string, honorarios: number | undefined, _userId: string | undefined) {
+    const t = await this.prisma.tramite.findUnique({ where: { id } });
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    this.assertNotCanceled(t);
+    this.assertNotFinalized(t);
+
+    const honorariosNormalized = Math.max(0, Number(honorarios ?? 0) || 0);
+
+    await this.prisma.tramite.update({
+      where: { id },
+      data: { honorariosValor: honorariosNormalized as any },
+    });
+
+    return this.cuentaCobroResumen(id);
+  }
+
   // ==========================
   // PATCH /tramites/:id
   // ==========================
@@ -1222,17 +1588,8 @@ export class TramitesService {
   }
 
   async cuentaCobroPdf(tramiteId: string, res: Response) {
-    const t = await this.prisma.tramite.findUnique({
-      where: { id: tramiteId },
-      include: {
-        concesionario: { select: { name: true } },
-        ciudad: { select: { name: true } },
-        cliente: { select: { nombre: true, doc: true } },
-      },
-    });
-
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id: tramiteId }, 404);
-    this.assertIsMatricula(t);
+    const t = await this.getCuentaCobroTramiteOrThrow(tramiteId);
+    const state = this.buildCuentaCobroState(t);
 
     const templatePath = this.cuentaCobroTemplatePath();
     let templateBytes: Buffer;
@@ -1346,18 +1703,36 @@ export class TramitesService {
       });
     };
 
+    const drawMoneyRow = (topY: number, value: number, opts: { size?: number; clearH?: number } = {}) => {
+      eraseTopRect(358, topY - 1.5, 148, opts.clearH ?? 16.5);
+      drawRightTop(`$ ${this.formatCuentaCobroMoney(value)}`, topY, CUENTA_COBRO_PDF_COORDS.tableValueRightX, {
+        font: fontBold,
+        size: opts.size ?? 10.5,
+        maxWidth: 140,
+        minSize: 8,
+      });
+    };
+
+    const drawYearRow = (topY: number, year: number | null) => {
+      eraseTopRect(CUENTA_COBRO_PDF_COORDS.tableYearCellX, topY - 1.5, CUENTA_COBRO_PDF_COORDS.tableYearCellWidth, 16.5);
+      if (!year) return;
+      drawCenterTop(String(year), topY, CUENTA_COBRO_PDF_COORDS.tableYearCellX, CUENTA_COBRO_PDF_COORDS.tableYearCellWidth, {
+        font: fontBold,
+        size: 10,
+        maxWidth: CUENTA_COBRO_PDF_COORDS.tableYearCellWidth - 6,
+        minSize: 8,
+      });
+    };
+
     const cuentaId = this.cuentaCobroDisplayId(t.year, t.concesionarioCodeSnapshot, t.consecutivo);
     const fecha = this.formatCuentaCobroDate(new Date());
-    const clienteNombre = (t.cliente.nombre ?? '').trim().toUpperCase();
-    const clienteDoc = (t.cliente.doc ?? '').trim();
-    const placa = (t.placa ?? '').trim().toUpperCase();
-    const ciudad = (t.ciudad.name ?? '').trim().toUpperCase();
-    const concesionario = (t.concesionario?.name ?? t.concesionarioCodeSnapshot ?? '').trim().toUpperCase();
-    const concepto = (t.cuentaCobroConcepto?.trim() || 'Traspaso').toUpperCase();
-    const valorTramite = Number((t as any).cuentaCobroValor ?? (t as any).honorariosValor ?? 0);
-    const valorTexto = `$ ${this.formatCuentaCobroMoney(valorTramite)}`;
+    const clienteNombre = (state.encabezado.cliente ?? '').trim().toUpperCase();
+    const clienteDoc = (state.encabezado.nit_o_cc ?? '').trim();
+    const placa = (state.encabezado.placas ?? '').trim().toUpperCase();
+    const ciudad = (state.encabezado.ciudad ?? '').trim().toUpperCase();
+    const concesionario = (state.encabezado.concesionario ?? '').trim().toUpperCase();
 
-    const headerRightX = 488;
+    const headerRightX = CUENTA_COBRO_PDF_COORDS.headerRightX;
     drawRightTop(cuentaId, 55.5, headerRightX, { font: fontBold, size: 11, maxWidth: 170, minSize: 8 });
     drawRightTop(fecha, 70.4, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 8 });
     drawRightTop(clienteNombre, 86.8, headerRightX, { font: fontBold, size: 8.5, maxWidth: 170, minSize: 6.5 });
@@ -1366,10 +1741,35 @@ export class TramitesService {
     drawRightTop(ciudad, 131.8, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 7 });
     drawRightTop(concesionario, 146.4, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 7 });
 
-    // La plantilla trae "Traspaso" preimpreso: se cubre y se reemplaza.
-    eraseTopRect(50, 361.5, 184, 15.5);
-    drawCenterTop(concepto, 362.8, 50, 184, { font: fontBold, size: 10, maxWidth: 176, minSize: 7 });
-    drawRightTop(valorTexto, 362.8, 505, { font: fontBold, size: 10.5, maxWidth: 140, minSize: 8 });
+    // Top section values
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topServiceValue, state.servicio.valor);
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topTotalCuentaCobroValue, state.totales.total_cuenta_de_cobro);
+
+    // Concept row "Traspaso" -> servicio real
+    const servicioPrincipal = state.conceptos.find((c) => c.key === 'SERVICIO_PRINCIPAL');
+    eraseTopRect(CUENTA_COBRO_PDF_COORDS.tableConceptCellX, 361.0, CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth, 17);
+    drawCenterTop(
+      (servicioPrincipal?.label ?? state.servicio.nombre_pdf ?? state.servicio.nombre ?? 'Traspaso').toUpperCase(),
+      362.8,
+      CUENTA_COBRO_PDF_COORDS.tableConceptCellX,
+      CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth,
+      { font: fontBold, size: 10, maxWidth: CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth - 8, minSize: 7 },
+    );
+
+    for (const c of state.conceptos) {
+      const def = findCuentaCobroConcept(c.key);
+      if (!def) continue;
+      if (def.yearTop !== undefined) drawYearRow(def.yearTop, c.anio);
+      if (def.valueTop !== undefined) drawMoneyRow(def.valueTop, c.amount_total);
+      if (def.has4x1000 && def.value4xTop !== undefined) drawMoneyRow(def.value4xTop, c.amount_4x1000);
+    }
+
+    // Bloque de totales
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.totals.totalReembolsar, state.totales.total_a_reembolsar);
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.totals.masTotalCuentaCobro, state.totales.mas_total_cuenta_de_cobro);
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.totals.totalCancelar, state.totales.total_a_cancelar);
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.totals.menosAbono, state.totales.menos_abono);
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.totals.saldoPendiente, state.totales.saldo_pdte_por_cancelar);
 
     res.setHeader('Content-Type', 'application/pdf');
     res.setHeader(
