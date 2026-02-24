@@ -1955,7 +1955,7 @@ export class TramitesService {
 
     // Top section values
     drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topServiceValue, state.honorarios);
-    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topTotalCuentaCobroValue, state.totales.total_cuenta_de_cobro);
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topTotalCuentaCobroValue, state.totales.saldo_pdte_por_cancelar);
 
     // Concept row "Traspaso" -> servicio real
     const servicioPrincipal = state.conceptos.find((c) => c.key === 'SERVICIO_PRINCIPAL');
@@ -1999,6 +1999,7 @@ export class TramitesService {
     res.end(Buffer.from(outputBytes));
   }
 }
+
 
 
 
