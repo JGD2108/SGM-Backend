@@ -203,7 +203,11 @@ export class TramitesService {
     const fechaCuentaCobro = t.cuentaCobroFecha ?? new Date();
     const encabezadoCliente = (t.cuentaCobroClienteNombre?.trim() || t.cliente.nombre || '').trim();
     const encabezadoDoc = (t.cuentaCobroClienteDoc?.trim() || t.cliente.doc || '').trim();
-    const encabezadoPlaca = (t.cuentaCobroPlaca?.trim() || t.placa || '').trim();
+    const serviceDataPlaca =
+      typeof t.serviceData === 'object' && t.serviceData && !Array.isArray(t.serviceData)
+        ? String(((t.serviceData as Record<string, unknown>).placa ?? '')).trim()
+        : '';
+    const encabezadoPlaca = (t.cuentaCobroPlaca?.trim() || serviceDataPlaca || t.placa || '').trim();
     const encabezadoCiudad = (t.cuentaCobroCiudad?.trim() || t.ciudad.name || '').trim();
     const encabezadoConcesionario = (
       t.cuentaCobroConcesionario?.trim() ||
@@ -1999,6 +2003,7 @@ export class TramitesService {
     res.end(Buffer.from(outputBytes));
   }
 }
+
 
 
 
