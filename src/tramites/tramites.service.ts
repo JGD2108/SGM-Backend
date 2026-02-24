@@ -1,4 +1,4 @@
-﻿import { Injectable } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { ConfigService } from '@nestjs/config';
 import { StorageService } from '../storage/storage.service';
@@ -162,7 +162,7 @@ export class TramitesService {
     if (!value || value.trim().length === 0) return new Date();
     const d = value.includes('T') ? new Date(value) : new Date(`${value}T00:00:00.000Z`);
     if (Number.isNaN(d.getTime())) {
-      throw new AppError('VALIDATION_ERROR', 'Fecha de pago inválida.', { fecha: value }, 400);
+      throw new AppError('VALIDATION_ERROR', 'Fecha de pago inv�lida.', { fecha: value }, 400);
     }
     return d;
   }
@@ -193,7 +193,7 @@ export class TramitesService {
       },
     })) as CuentaCobroTramiteRecord | null;
 
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Tr�mite no existe.', { id }, 404);
     return t;
   }
 
@@ -268,8 +268,9 @@ export class TramitesService {
       const amount_4x1000 = g?.amount_4x1000 ?? 0;
       const anio = def.yearTop !== undefined ? (g?.anio ?? t.year) : null;
       const label =
-        g?.label_snapshot?.trim() ||
-        (def.key === 'SERVICIO_PRINCIPAL' ? servicioNombrePdf : def.label);
+        def.key === 'SERVICIO_PRINCIPAL'
+          ? servicioNombrePdf
+          : g?.label_snapshot?.trim() || def.label;
       return {
         key: def.key,
         conceptoId: def.conceptoId,
@@ -330,14 +331,14 @@ export class TramitesService {
     };
   }
 
-  // âœ… /tramites es SOLO MATRÃCULAS
+  // ✅ /tramites es SOLO MATRÍCULAS
   private assertIsMatricula(tramite: { tipoServicio?: any }) {
     const tipo = (tramite as any).tipoServicio;
-    // Si es null/undefined lo tratamos como matrÃ­cula (compatibilidad si habÃ­a datos viejos)
+    // Si es null/undefined lo tratamos como matrícula (compatibilidad si había datos viejos)
     if (tipo && tipo !== ServicioTipo.MATRICULA) {
       throw new AppError(
         'NOT_MATRICULA',
-        'Este registro no es una matrÃ­cula. Usa /servicios.',
+        'Este registro no es una matrícula. Usa /servicios.',
         { tipo_servicio: tipo },
         400,
       );
@@ -346,22 +347,22 @@ export class TramitesService {
 
   private assertNotFinalized(tramite: { estadoActual: TramiteEstado }) {
     if (tramite.estadoActual === 'FINALIZADO_ENTREGADO') {
-      throw new AppError('FINALIZED_LOCK', 'El trÃ¡mite estÃ¡ finalizado. Debes reabrir para editar.', {}, 409);
+      throw new AppError('FINALIZED_LOCK', 'El trámite está finalizado. Debes reabrir para editar.', {}, 409);
     }
   }
 
   private assertNotCanceled(tramite: { estadoActual: TramiteEstado }) {
     if (tramite.estadoActual === 'CANCELADO') {
-      throw new AppError('CANCELED_LOCK', 'El trÃ¡mite estÃ¡ cancelado. No se puede modificar.', {}, 409);
+      throw new AppError('CANCELED_LOCK', 'El trámite está cancelado. No se puede modificar.', {}, 409);
     }
   }
 
-  // âœ… Nuevo: lock Ãºnico para cambio de estado (segÃºn tu regla nueva)
+  // ✅ Nuevo: lock único para cambio de estado (según tu regla nueva)
   private assertNotLockedForEstadoChange(tramite: { estadoActual: TramiteEstado }) {
     if (tramite.estadoActual === 'FINALIZADO_ENTREGADO' || tramite.estadoActual === 'CANCELADO') {
       throw new AppError(
         'TRAMITE_LOCKED',
-        'El trÃ¡mite estÃ¡ finalizado o cancelado. No se puede modificar.',
+        'El trámite está finalizado o cancelado. No se puede modificar.',
         { estado_actual: tramite.estadoActual },
         409,
       );
@@ -532,12 +533,12 @@ export class TramitesService {
     const pageCount = await countPdfPages(buffer);
     const max = this.maxPdfPages();
     if (pageCount > max) {
-      throw new AppError('PDF_TOO_MANY_PAGES', `El PDF excede ${max} pÃ¡ginas.`, { pageCount, max }, 422);
+      throw new AppError('PDF_TOO_MANY_PAGES', `El PDF excede ${max} páginas.`, { pageCount, max }, 422);
     }
     return pageCount;
   }
 
-  // âœ… Reserva el menor libre. Si hay choque, reintenta.
+  // ✅ Reserva el menor libre. Si hay choque, reintenta.
   private async getUploadBuffer(file: Express.Multer.File | undefined, field: string): Promise<Buffer> {
     if (!file) {
       throw new AppError('VALIDATION_ERROR', 'Archivo obligatorio.', { field }, 400);
@@ -582,7 +583,7 @@ export class TramitesService {
         );
       } catch (e: any) {
         if (attempt === maxRetries) throw e;
-        // reintento por conflicto/serializaciÃ³n
+        // reintento por conflicto/serialización
       }
     }
 
@@ -606,33 +607,33 @@ export class TramitesService {
     const facturaBuffer = await this.getUploadBuffer(facturaFile, 'factura');
     const pageCount = await this.validatePdfOrThrow(facturaBuffer);
 
-    // catÃ¡logos
+    // catálogos
     const concesionario = await this.prisma.concesionario.findUnique({
       where: { code: dto.concesionarioCode },
     });
     if (!concesionario) {
-      throw new AppError('VALIDATION_ERROR', 'Concesionario invÃ¡lido.', { concesionarioCode: dto.concesionarioCode }, 400);
+      throw new AppError('VALIDATION_ERROR', 'Concesionario inválido.', { concesionarioCode: dto.concesionarioCode }, 400);
     }
 
     const ciudad = await this.prisma.ciudad.findUnique({ where: { name: dto.ciudad } });
     if (!ciudad) {
-      throw new AppError('VALIDATION_ERROR', 'Ciudad invÃ¡lida.', { ciudad: dto.ciudad }, 400);
+      throw new AppError('VALIDATION_ERROR', 'Ciudad inválida.', { ciudad: dto.ciudad }, 400);
     }
 
     const year = new Date().getFullYear();
 
-    // 1) Reservar consecutivo (transacciÃ³n)
+    // 1) Reservar consecutivo (transacción)
     const reserva = await this.reserveNextConsecutivo(concesionario.id, year);
     const consecutivo = reserva.consecutivo;
 
-    // 2) Escribir factura al disco ANTES de crear el trÃ¡mite (para evitar trÃ¡mite sin PDF)
+    // 2) Escribir factura al disco ANTES de crear el trámite (para evitar trámite sin PDF)
     const filename = `FACTURA_v1.pdf`;
     const storagePath = this.storage.buildRelativePath(year, concesionario.code, consecutivo, filename);
 
     try {
       await this.storage.writeFile(storagePath, facturaBuffer);
 
-      // 3) Crear trÃ¡mite + checklist + file record + historial y amarrar reserva
+      // 3) Crear trámite + checklist + file record + historial y amarrar reserva
       const result = await this.prisma.$transaction(async (tx) => {
         // cliente (no es unique, entonces hacemos findFirst)
         let cliente = await tx.cliente.findFirst({ where: { doc: dto.clienteDoc } });
@@ -641,7 +642,7 @@ export class TramitesService {
             data: { doc: dto.clienteDoc, nombre: dto.clienteNombre },
           });
         } else {
-          // opcional: actualiza nombre si cambiÃ³
+          // opcional: actualiza nombre si cambió
           if (cliente.nombre !== dto.clienteNombre) {
             cliente = await tx.cliente.update({
               where: { id: cliente.id },
@@ -659,18 +660,18 @@ export class TramitesService {
             ciudadId: ciudad.id,
             clienteId: cliente.id,
 
-            // âœ… regla nueva: placa NO existe al crear
+            // ✅ regla nueva: placa NO existe al crear
             placa: null,
             estadoActual: 'FACTURA_RECIBIDA',
 
-            // âœ… IMPORTANTE: esto es matrÃ­cula
+            // ✅ IMPORTANTE: esto es matrícula
             tipoServicio: ServicioTipo.MATRICULA,
             estadoServicio: null,
             createdById: userId,
           },
         });
 
-        // amarrar reserva al trÃ¡mite
+        // amarrar reserva al trámite
         await tx.consecutivoReserva.update({
           where: { id: reserva.id },
           data: { tramiteId: tramite.id, status: 'RESERVADO' },
@@ -714,7 +715,7 @@ export class TramitesService {
             fromEstado: null,
             toEstado: 'FACTURA_RECIBIDA',
             changedById: userId,
-            notes: 'CreaciÃ³n de trÃ¡mite con factura.',
+            notes: 'Creación de trámite con factura.',
             actionType: 'NORMAL',
           },
         });
@@ -730,7 +731,7 @@ export class TramitesService {
         consecutivo,
       };
     } catch (e) {
-      // compensaciÃ³n si algo falla
+      // compensación si algo falla
       await this.storage.deleteFileIfExists(storagePath);
       await this.prisma.consecutivoReserva.updateMany({
         where: { id: reserva.id, status: 'RESERVADO' },
@@ -753,7 +754,7 @@ export class TramitesService {
     const includeCancelados = String(query.includeCancelados ?? 'false') === 'true';
 
     const where: Prisma.TramiteWhereInput = {
-      // âœ… /tramites = SOLO MATRÃCULAS
+      // ✅ /tramites = SOLO MATRÍCULAS
       tipoServicio: ServicioTipo.MATRICULA,
     };
 
@@ -857,10 +858,10 @@ export class TramitesService {
       },
     });
 
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
-    // is_atrasado (mismo cÃ¡lculo pero por 1 trÃ¡mite)
+    // is_atrasado (mismo cálculo pero por 1 trámite)
     const rules = await this.prisma.alertRule.findMany({ where: { isActive: true } });
     const events = await this.prisma.tramiteEstadoHist.findMany({
       where: { tramiteId: id },
@@ -1007,7 +1008,7 @@ export class TramitesService {
 
   async setCuentaCobroBase(id: string, dto: SetCuentaCobroBaseDto, _userId: string | undefined) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Tr�mite no existe.', { id }, 404);
     this.assertNotCanceled(t);
     this.assertNotFinalized(t);
 
@@ -1054,7 +1055,7 @@ export class TramitesService {
         payments: { select: { id: true } },
       },
     });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Tr�mite no existe.', { id }, 404);
     this.assertNotCanceled(t);
     this.assertNotFinalized(t);
 
@@ -1063,7 +1064,7 @@ export class TramitesService {
     if ((payloadItems?.length ?? 0) > CUENTA_COBRO_CONCEPTS.length) {
       throw new AppError(
         'VALIDATION_ERROR',
-        'La plantilla solo soporta un número limitado de conceptos.',
+        'La plantilla solo soporta un n�mero limitado de conceptos.',
         { maxConcepts: CUENTA_COBRO_CONCEPTS.length, received: payloadItems?.length ?? 0 },
         400,
       );
@@ -1077,10 +1078,10 @@ export class TramitesService {
       let def = explicitId ? findCuentaCobroConceptById(explicitId) : undefined;
       if (!def && explicitKey) def = findCuentaCobroConcept(explicitKey);
       if (explicitKey && !def) {
-        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inválido.', { concepto_key: explicitKey }, 400);
+        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inv�lido.', { concepto_key: explicitKey }, 400);
       }
       if (explicitId && !def) {
-        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inválido.', { conceptoId: explicitId }, 400);
+        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inv�lido.', { conceptoId: explicitId }, 400);
       }
 
       if (!def) {
@@ -1091,7 +1092,7 @@ export class TramitesService {
         if (!def) {
           throw new AppError(
             'VALIDATION_ERROR',
-            'No hay más filas disponibles en la plantilla para conceptos.',
+            'No hay m�s filas disponibles en la plantilla para conceptos.',
             { maxConcepts: CUENTA_COBRO_CONCEPTS.length },
             400,
           );
@@ -1112,7 +1113,7 @@ export class TramitesService {
       if (!Number.isFinite(amountTotal) || !Number.isFinite(amount4x1000)) {
         throw new AppError(
           'VALIDATION_ERROR',
-          'Montos inválidos en cuenta de cobro.',
+          'Montos inv�lidos en cuenta de cobro.',
           { conceptoId: explicitId ?? def.key, valor_total: amountTotalRaw, valor_4x1000: amount4x1000Raw },
           400,
         );
@@ -1163,7 +1164,7 @@ export class TramitesService {
           const yearRaw = inputYear ?? t.year ?? new Date().getFullYear();
           const yearNum = Number(yearRaw);
           if (!Number.isFinite(yearNum) || yearNum < 2000) {
-            throw new AppError('VALIDATION_ERROR', 'Año inválido para cuenta de cobro.', { conceptoId: def.conceptoId, anio: yearRaw }, 400);
+            throw new AppError('VALIDATION_ERROR', 'A�o inv�lido para cuenta de cobro.', { conceptoId: def.conceptoId, anio: yearRaw }, 400);
           }
           anio = Math.trunc(yearNum);
         }
@@ -1192,7 +1193,7 @@ export class TramitesService {
 
   async setCuentaCobroHonorarios(id: string, honorarios: number | undefined, _userId: string | undefined) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Tr�mite no existe.', { id }, 404);
     this.assertNotCanceled(t);
     this.assertNotFinalized(t);
 
@@ -1208,7 +1209,7 @@ export class TramitesService {
 
   async setCuentaCobroAbono(id: string, abono: number | undefined, _userId: string | undefined) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Tr�mite no existe.', { id }, 404);
     this.assertNotCanceled(t);
     this.assertNotFinalized(t);
 
@@ -1230,19 +1231,19 @@ export class TramitesService {
       where: { id },
       include: { concesionario: true, ciudad: true },
     });
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     this.assertNotCanceled(t);
     this.assertNotFinalized(t);
 
-    // âœ… honorarios (si viene)
+    // ✅ honorarios (si viene)
     const honorariosParsed = this.parseMoney((dto as any).honorariosValor);
     if (honorariosParsed !== null) {
       if (!Number.isFinite(honorariosParsed)) {
         throw new AppError(
           'VALIDATION_ERROR',
-          'honorariosValor invÃ¡lido.',
+          'honorariosValor inválido.',
           { honorariosValor: (dto as any).honorariosValor },
           400,
         );
@@ -1262,7 +1263,7 @@ export class TramitesService {
       if (!Number.isFinite(cuentaCobroValorParsed)) {
         throw new AppError(
           'VALIDATION_ERROR',
-          'cuentaCobroValor invÃ¡lido.',
+          'cuentaCobroValor inválido.',
           { cuentaCobroValor: (dto as any).cuentaCobroValor },
           400,
         );
@@ -1287,14 +1288,14 @@ export class TramitesService {
     let ciudadId = t.ciudadId;
     if (dto.ciudad) {
       const ciudad = await this.prisma.ciudad.findUnique({ where: { name: dto.ciudad } });
-      if (!ciudad) throw new AppError('VALIDATION_ERROR', 'Ciudad invÃ¡lida.', { ciudad: dto.ciudad }, 400);
+      if (!ciudad) throw new AppError('VALIDATION_ERROR', 'Ciudad inválida.', { ciudad: dto.ciudad }, 400);
       ciudadId = ciudad.id;
     }
 
     // Cambio de concesionario (reasigna consecutivo y guarda anterior)
     if (dto.concesionarioCode && dto.concesionarioCode !== t.concesionarioCodeSnapshot) {
       const nuevo = await this.prisma.concesionario.findUnique({ where: { code: dto.concesionarioCode } });
-      if (!nuevo) throw new AppError('VALIDATION_ERROR', 'Concesionario invÃ¡lido.', { concesionarioCode: dto.concesionarioCode }, 400);
+      if (!nuevo) throw new AppError('VALIDATION_ERROR', 'Concesionario inválido.', { concesionarioCode: dto.concesionarioCode }, 400);
 
       const reservaNueva = await this.reserveNextConsecutivo(nuevo.id, t.year);
 
@@ -1321,7 +1322,7 @@ export class TramitesService {
             consecutivo: reservaNueva.consecutivo,
             ciudadId,
 
-            // âœ… placa no se cambia por PATCH (regla nueva)
+            // ✅ placa no se cambia por PATCH (regla nueva)
 
             ...(honorariosParsed !== null ? { honorariosValor: honorariosParsed as any } : {}),
             ...(cuentaCobroConceptoNormalized !== undefined
@@ -1368,7 +1369,7 @@ export class TramitesService {
   // ==========================
   async historial(id: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     const rows = await this.prisma.tramiteEstadoHist.findMany({
@@ -1388,7 +1389,7 @@ export class TramitesService {
     }));
   }
 
-  // âœ… CAMBIO PRINCIPAL: ahora soporta placa atÃ³mica por estado
+  // ✅ CAMBIO PRINCIPAL: ahora soporta placa atómica por estado
   async changeEstado(
     id: string,
     toEstadoRaw: any,
@@ -1397,7 +1398,7 @@ export class TramitesService {
     placa?: string,
   ) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     // lock (finalizado/cancelado)
@@ -1407,10 +1408,10 @@ export class TramitesService {
     const toEstado = String(toEstadoRaw) as TramiteEstado;
     const validStates = Object.values(TramiteEstado) as string[];
     if (!validStates.includes(toEstado)) {
-      throw new AppError('INVALID_STATE', 'Estado invÃ¡lido.', { toEstado }, 400);
+      throw new AppError('INVALID_STATE', 'Estado inválido.', { toEstado }, 400);
     }
 
-    // validaciÃ³n por estado: placa obligatoria en PLACA_ASIGNADA
+    // validación por estado: placa obligatoria en PLACA_ASIGNADA
     let placaNormalized: string | undefined = undefined;
 
     if (toEstado === 'PLACA_ASIGNADA') {
@@ -1451,13 +1452,13 @@ export class TramitesService {
 
   async finalizar(id: string, userId: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     this.assertNotCanceled(t);
 
     if (t.estadoActual === 'FINALIZADO_ENTREGADO') {
-      throw new AppError('CONFLICT', 'Ya estÃ¡ finalizado.', {}, 409);
+      throw new AppError('CONFLICT', 'Ya está finalizado.', {}, 409);
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -1483,11 +1484,11 @@ export class TramitesService {
 
   async cancelar(id: string, reason: string | undefined, userId: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     if (t.estadoActual === 'CANCELADO') {
-      throw new AppError('CONFLICT', 'Ya estÃ¡ cancelado.', {}, 409);
+      throw new AppError('CONFLICT', 'Ya está cancelado.', {}, 409);
     }
 
     await this.prisma.$transaction(async (tx) => {
@@ -1518,13 +1519,13 @@ export class TramitesService {
 
   async reabrir(id: string, reason: string, toEstado: TramiteEstado | undefined, userId: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     this.assertNotCanceled(t);
 
     if (t.estadoActual !== 'FINALIZADO_ENTREGADO') {
-      throw new AppError('CONFLICT', 'Solo se puede reabrir si estÃ¡ finalizado.', {}, 409);
+      throw new AppError('CONFLICT', 'Solo se puede reabrir si está finalizado.', {}, 409);
     }
 
     const target: TramiteEstado = toEstado ?? 'DOCS_FISICOS_PENDIENTES';
@@ -1555,7 +1556,7 @@ export class TramitesService {
   // ==========================
   async checklist(id: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
     await this.ensureFlexibleChecklistItem(id);
 
@@ -1580,7 +1581,7 @@ export class TramitesService {
   // ==========================
   async listFiles(id: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
-    if (!t) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
     this.assertIsMatricula(t);
 
     const files = await this.prisma.tramiteFile.findMany({
@@ -1616,7 +1617,7 @@ export class TramitesService {
     }
 
     const tramite = await this.prisma.tramite.findUnique({ where: { id: tramiteId } });
-    if (!tramite) throw new AppError('NOT_FOUND', 'TrÃ¡mite no existe.', { id: tramiteId }, 404);
+    if (!tramite) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id: tramiteId }, 404);
     this.assertIsMatricula(tramite);
 
     this.assertNotCanceled(tramite);
@@ -1696,7 +1697,7 @@ export class TramitesService {
     const tramites = await this.prisma.tramite.findMany({
       where: {
         estadoActual: { not: 'CANCELADO' },
-        // âœ… SOLO MATRÃCULAS
+        // ✅ SOLO MATRÍCULAS
         tipoServicio: ServicioTipo.MATRICULA,
       },
       include: {
@@ -1741,7 +1742,7 @@ export class TramitesService {
         const daysLate = days - r.thresholdDays;
 
         if (daysLate > 0) {
-          const text = `${r.fromEstado} -> ${r.toEstado} > ${r.thresholdDays} dÃ­as`;
+          const text = `${r.fromEstado} -> ${r.toEstado} > ${r.thresholdDays} días`;
           if (!worst || daysLate > worst.daysLate) worst = { ruleText: text, daysLate };
         }
       }
@@ -1782,7 +1783,7 @@ export class TramitesService {
     } catch {
       throw new AppError(
         'CUENTA_COBRO_TEMPLATE_NOT_FOUND',
-        'No se encontró la plantilla de cuenta de cobro.',
+        'No se encontr� la plantilla de cuenta de cobro.',
         { templatePath },
         500,
       );
@@ -1790,11 +1791,11 @@ export class TramitesService {
 
     const template = await PDFDocument.load(templateBytes, { ignoreEncryption: true });
     if (template.getPageCount() < 1) {
-      throw new AppError('CUENTA_COBRO_TEMPLATE_INVALID', 'La plantilla de cuenta de cobro no tiene páginas.', {}, 500);
+      throw new AppError('CUENTA_COBRO_TEMPLATE_INVALID', 'La plantilla de cuenta de cobro no tiene p�ginas.', {}, 500);
     }
 
     const out = await PDFDocument.create();
-    const [page] = await out.copyPages(template, [0]); // solo página 1
+    const [page] = await out.copyPages(template, [0]); // solo p�gina 1
     out.addPage(page);
 
     const pdfPage = out.getPage(0);
@@ -1959,7 +1960,7 @@ export class TramitesService {
     // Concept row "Traspaso" -> servicio real
     const servicioPrincipal = state.conceptos.find((c) => c.key === 'SERVICIO_PRINCIPAL');
     drawCenterTop(
-      (servicioPrincipal?.label ?? state.servicio.nombre_pdf ?? state.servicio.nombre ?? 'Traspaso').toUpperCase(),
+      (state.servicio.nombre_pdf ?? servicioPrincipal?.label ?? state.servicio.nombre ?? 'SERVICIO').toUpperCase(),
       362.8,
       CUENTA_COBRO_PDF_COORDS.tableConceptCellX,
       CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth,
@@ -1968,10 +1969,6 @@ export class TramitesService {
         size: 10,
         maxWidth: CUENTA_COBRO_PDF_COORDS.tableConceptCellWidth - 12,
         minSize: 7,
-        eraseBackground: true,
-        erasePadX: 8,
-        erasePadTop: 1.0,
-        erasePadBottom: 1.0,
       },
     );
 
@@ -2002,3 +1999,6 @@ export class TramitesService {
     res.end(Buffer.from(outputBytes));
   }
 }
+
+
+
