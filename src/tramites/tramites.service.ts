@@ -1975,8 +1975,8 @@ export class TramitesService {
     for (const c of state.conceptos) {
       const def = findCuentaCobroConcept(c.key);
       if (!def) continue;
-      if (def.yearTop !== undefined) {
-        drawYearRow(def.yearTop, c.anio, { clearTemplateText: c.key === 'IMPUESTO_TIMBRE' });
+      if (def.yearTop !== undefined && c.key !== 'IMPUESTO_TIMBRE') {
+        drawYearRow(def.yearTop, c.anio);
       }
       if (def.valueTop !== undefined) drawMoneyRow(def.valueTop, c.amount_total);
       if (def.has4x1000 && def.value4xTop !== undefined) drawMoneyRow(def.value4xTop, c.amount_4x1000);
@@ -1999,6 +1999,10 @@ export class TramitesService {
     res.end(Buffer.from(outputBytes));
   }
 }
+
+
+
+
 
 
 
