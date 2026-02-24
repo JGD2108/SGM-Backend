@@ -149,8 +149,8 @@ export function resolveCuentaCobroServiceName(
 
 export const CUENTA_COBRO_PDF_COORDS = {
   headerRightX: 488,
-  topServiceValue: 206.0, // fila "Servicio por tramite"
-  topTotalCuentaCobroValue: 189.7, // fila "TOTAL CUENTA DE COBRO"
+  topServiceValue: 202.8, // fila "Servicio por tramite"
+  topTotalCuentaCobroValue: 186.5, // fila "TOTAL CUENTA DE COBRO"
   tableConceptCellX: 50,
   tableConceptCellWidth: 184,
   tableYearCellX: 236,
@@ -164,3 +164,4 @@ export const CUENTA_COBRO_PDF_COORDS = {
     saldoPendiente: 555.1,
   },
 } as const;
+
