@@ -1954,7 +1954,7 @@ export class TramitesService {
     drawRightTop(concesionario, 146.4, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 7 });
 
     // Top section values
-    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topServiceValue, state.servicio.valor);
+    drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topServiceValue, state.honorarios);
     drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topTotalCuentaCobroValue, state.totales.total_cuenta_de_cobro);
 
     // Concept row "Traspaso" -> servicio real
@@ -1999,6 +1999,7 @@ export class TramitesService {
     res.end(Buffer.from(outputBytes));
   }
 }
+
 
 
 
