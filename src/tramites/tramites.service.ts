@@ -665,18 +665,33 @@ export class TramitesService {
 
       // 3) Crear trámite + checklist + file record + historial y amarrar reserva
       const result = await this.prisma.$transaction(async (tx) => {
+        const clienteContactData = {
+          ...(dto.clienteEmail !== undefined ? { email: dto.clienteEmail } : {}),
+          ...(dto.clienteTelefono !== undefined ? { telefono: dto.clienteTelefono } : {}),
+          ...(dto.clienteDireccion !== undefined ? { direccion: dto.clienteDireccion } : {}),
+        };
+
         // cliente (no es unique, entonces hacemos findFirst)
         let cliente = await tx.cliente.findFirst({ where: { doc: dto.clienteDoc } });
         if (!cliente) {
           cliente = await tx.cliente.create({
-            data: { doc: dto.clienteDoc, nombre: dto.clienteNombre },
+            data: {
+              doc: dto.clienteDoc,
+              nombre: dto.clienteNombre,
+              ...clienteContactData,
+            },
           });
         } else {
-          // opcional: actualiza nombre si cambió
-          if (cliente.nombre !== dto.clienteNombre) {
+          const clienteUpdateData = {
+            ...(cliente.nombre !== dto.clienteNombre ? { nombre: dto.clienteNombre } : {}),
+            ...clienteContactData,
+          };
+
+          // opcional: actualiza nombre/contacto si llegaron cambios
+          if (Object.keys(clienteUpdateData).length > 0) {
             cliente = await tx.cliente.update({
               where: { id: cliente.id },
-              data: { nombre: dto.clienteNombre },
+              data: clienteUpdateData,
             });
           }
         }

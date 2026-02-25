@@ -128,9 +128,12 @@ model DocumentType {
 }
 
 model Cliente {
-  id     String @id @default(cuid())
-  nombre String
-  doc    String
+  id        String  @id @default(cuid())
+  nombre    String
+  doc       String
+  email     String?
+  telefono  String?
+  direccion String?
 
   tramites Tramite[]
 

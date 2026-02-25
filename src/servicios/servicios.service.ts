@@ -124,17 +124,33 @@ export class ServiciosService {
 
     try {
       const created = await this.prisma.$transaction(async (tx) => {
+        const clienteContactData = {
+          ...(dto.clienteEmail !== undefined ? { email: dto.clienteEmail } : {}),
+          ...(dto.clienteTelefono !== undefined ? { telefono: dto.clienteTelefono } : {}),
+          ...(dto.clienteDireccion !== undefined ? { direccion: dto.clienteDireccion } : {}),
+        };
+
         // cliente
         let cliente = await tx.cliente.findFirst({ where: { doc: dto.clienteDoc } });
         if (!cliente) {
           cliente = await tx.cliente.create({
-            data: { doc: dto.clienteDoc, nombre: dto.clienteNombre },
+            data: {
+              doc: dto.clienteDoc,
+              nombre: dto.clienteNombre,
+              ...clienteContactData,
+            },
           });
-        } else if (cliente.nombre !== dto.clienteNombre) {
-          cliente = await tx.cliente.update({
-            where: { id: cliente.id },
-            data: { nombre: dto.clienteNombre },
-          });
+        } else {
+          const clienteUpdateData = {
+            ...(cliente.nombre !== dto.clienteNombre ? { nombre: dto.clienteNombre } : {}),
+            ...clienteContactData,
+          };
+          if (Object.keys(clienteUpdateData).length > 0) {
+            cliente = await tx.cliente.update({
+              where: { id: cliente.id },
+              data: clienteUpdateData,
+            });
+          }
         }
 
         const t = await tx.tramite.create({

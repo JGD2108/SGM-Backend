@@ -1,0 +1,11 @@
+[Unit]
+Description=Run SGM yearly cleanup once per year
+
+[Timer]
+OnCalendar=*-01-05 03:30:00
+Persistent=true
+RandomizedDelaySec=15m
+Unit=sgm-yearly-cleanup.service
+
+[Install]
+WantedBy=timers.target

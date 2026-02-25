@@ -1,6 +1,13 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { ServicioTipo } from '@prisma/client';
-import { IsEnum, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsEmail, IsEnum, IsObject, IsOptional, IsString, MaxLength } from 'class-validator';
+
+function optionalTrimmedString(value: unknown) {
+  if (value === undefined || value === null) return undefined;
+  const s = String(value).trim();
+  return s.length > 0 ? s : undefined;
+}
 
 export class CreateServicioDto {
   @ApiProperty({ example: 'AUTOTROPICAL' })
@@ -22,6 +29,27 @@ export class CreateServicioDto {
   @IsString()
   @MaxLength(40)
   clienteDoc!: string;
+
+  @ApiPropertyOptional({ example: 'cliente@correo.com' })
+  @Transform(({ value }) => optionalTrimmedString(value))
+  @IsOptional()
+  @IsEmail()
+  @MaxLength(160)
+  clienteEmail?: string;
+
+  @ApiPropertyOptional({ example: '3001234567' })
+  @Transform(({ value }) => optionalTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  clienteTelefono?: string;
+
+  @ApiPropertyOptional({ example: 'Calle 1 #2-3, Barranquilla' })
+  @Transform(({ value }) => optionalTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(200)
+  clienteDireccion?: string;
 
   @ApiProperty({ enum: ServicioTipo, example: 'TRASPASO' })
   @IsEnum(ServicioTipo)

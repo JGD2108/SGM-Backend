@@ -1,0 +1,15 @@
+[Unit]
+Description=SGM yearly cleanup (preserves users)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=__RUN_USER__
+WorkingDirectory=__REPO_ROOT__
+ExecStart=/bin/bash __REPO_ROOT__/ops/run-yearly-cleanup.sh --execute
+Nice=10
+IOSchedulingClass=best-effort
+
+[Install]
+WantedBy=multi-user.target
