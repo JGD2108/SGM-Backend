@@ -1955,7 +1955,7 @@ export class TramitesService {
     drawRightTop(clienteDoc, 103.0, headerRightX, { font: fontBold, size: 8.5, maxWidth: 145, minSize: 7 });
     drawRightTop(placa, 117.3, headerRightX, { font: fontBold, size: 10, maxWidth: 120, minSize: 8 });
     drawRightTop(ciudad, 131.8, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 7 });
-    drawRightTop(concesionario, 146.4, headerRightX, { font: fontBold, size: 10, maxWidth: 170, minSize: 7 });
+    drawRightTop(concesionario, 146.4, headerRightX, { font: fontBold, size: 10, maxWidth: 135, minSize: 7 });
 
     // Top section values
     drawMoneyRow(CUENTA_COBRO_PDF_COORDS.topServiceValue, state.honorarios);
