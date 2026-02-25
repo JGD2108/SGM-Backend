@@ -13,7 +13,7 @@ Versioned operational scripts for yearly cleanup and systemd job installation.
 
 ## Main files
 
-- `ops/yearly-cleanup.js`: cleanup script (`dry-run` by default)
+- `ops/yearly-cleanup.js`: cleanup script (`dry-run` by default when called directly)
 - `ops/run-yearly-cleanup.sh`: loads `.env` and executes the cleanup script
 - `ops/install-jobs.sh`: installs/updates `systemd` units
 - `ops/install-post-merge-hook.sh`: optional git hook installer (post-merge)
@@ -26,13 +26,13 @@ bash ops/install-jobs.sh --user ubuntu
 bash ops/run-yearly-cleanup.sh --dry-run
 ```
 
-`systemd` service default is now safe (`dry-run`). To run a real deletion manually:
+`systemd` service/wrapper default is configured as `execute`. To force a safe preview manually:
 
 ```bash
-bash ops/run-yearly-cleanup.sh --execute
+bash ops/run-yearly-cleanup.sh --dry-run
 ```
 
-To switch the scheduled `systemd` job to real execution (`execute`) without editing versioned files, add a systemd override:
+If you need to temporarily force `dry-run` without editing versioned files, add a systemd override:
 
 ```bash
 sudo systemctl edit sgm-yearly-cleanup.service
@@ -42,7 +42,7 @@ Then add:
 
 ```ini
 [Service]
-Environment=CLEANUP_DEFAULT_MODE=execute
+Environment=CLEANUP_DEFAULT_MODE=dry-run
 ```
 
 Optional git hook (server checkout only):

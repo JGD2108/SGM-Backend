@@ -20,7 +20,7 @@ CONTAINER_NAME="${CLEANUP_CONTAINER_NAME:-sgm_api}"
 CONTAINER_WORKDIR="${CLEANUP_CONTAINER_WORKDIR:-}"
 CONTAINER_SUMMARY_DIR="${CLEANUP_CONTAINER_SUMMARY_DIR:-/tmp/sgm-yearly-cleanup}"
 HOST_SUMMARY_DIR="${CLEANUP_HOST_SUMMARY_DIR:-${REPO_ROOT}/logs/yearly-cleanup}"
-DEFAULT_MODE="${CLEANUP_DEFAULT_MODE:-dry-run}"    # dry-run | execute
+DEFAULT_MODE="${CLEANUP_DEFAULT_MODE:-execute}"    # dry-run | execute
 
 MODE_FLAG="--dry-run"
 if [[ "${DEFAULT_MODE}" == "execute" ]]; then
