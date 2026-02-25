@@ -9,6 +9,8 @@ User=__RUN_USER__
 WorkingDirectory=__REPO_ROOT__
 Environment=CLEANUP_EXECUTION_MODE=docker
 Environment=CLEANUP_CONTAINER_NAME=sgm_api
+Environment=CLEANUP_HOST_SUMMARY_DIR=__REPO_ROOT__/logs/yearly-cleanup
+Environment=CLEANUP_DEFAULT_MODE=dry-run
 ExecStart=/bin/bash __REPO_ROOT__/ops/run-yearly-cleanup.sh
 Nice=10
 IOSchedulingClass=best-effort

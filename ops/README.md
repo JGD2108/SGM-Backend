@@ -9,6 +9,7 @@ Versioned operational scripts for yearly cleanup and systemd job installation.
 - Writes a compact JSON summary (`logs/yearly-cleanup/...`) before/after execution.
 - Installs a `systemd` timer so the job runs once per year.
 - Runs the cleanup through Docker (`sgm_api`) in Lightsail by default (via `systemd` service env).
+- Copies the JSON summary from the container to the host (`logs/yearly-cleanup/`).
 
 ## Main files
 
@@ -31,6 +32,19 @@ bash ops/run-yearly-cleanup.sh --dry-run
 bash ops/run-yearly-cleanup.sh --execute
 ```
 
+To switch the scheduled `systemd` job to real execution (`execute`) without editing versioned files, add a systemd override:
+
+```bash
+sudo systemctl edit sgm-yearly-cleanup.service
+```
+
+Then add:
+
+```ini
+[Service]
+Environment=CLEANUP_DEFAULT_MODE=execute
+```
+
 Optional git hook (server checkout only):
 
 ```bash
@@ -41,4 +55,5 @@ bash ops/install-post-merge-hook.sh
 
 - `git pull` alone does not apply OS-level job changes. The hook or `ops/install-jobs.sh` handles that.
 - The installed `systemd` unit forces `CLEANUP_EXECUTION_MODE=docker`, so it will fail safely if `sgm_api` is down.
+- The installed `systemd` unit writes host summaries to `logs/yearly-cleanup/` in the repo path.
 - To also delete orphan clients, set `CLEANUP_DELETE_ORPHAN_CLIENTS=true` in the server environment.
