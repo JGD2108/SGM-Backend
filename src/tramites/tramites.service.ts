@@ -696,6 +696,14 @@ export class TramitesService {
           }
         }
 
+        if (!cliente?.id) {
+          throw new AppError(
+            'CLIENTE_PERSISTENCE_ERROR',
+            'No se pudo guardar/obtener el cliente antes de crear el tramite.',
+            { clienteDoc: dto.clienteDoc, clienteNombre: dto.clienteNombre },
+            500,
+          );
+        }
         const tramite = await tx.tramite.create({
           data: {
             year,

@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { AppError } from '../common/errors/app-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpsertClienteDto } from './dto/upsert-cliente.dto';
@@ -22,13 +23,30 @@ function trimOptional(value: unknown): string | undefined {
   return s.length > 0 ? s : undefined;
 }
 
+function normalizeDocKey(value: string | undefined): string | null {
+  const s = String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  return s.length > 0 ? s : null;
+}
+
+type ClienteRow = {
+  id: string;
+  doc: string;
+  nombre: string;
+  email: string | null;
+  telefono: string | null;
+  direccion: string | null;
+};
+
 @Injectable()
 export class ClientesService {
   constructor(private readonly prisma: PrismaService) {}
 
   private async findClienteEntityByDoc(docRaw: string) {
     const doc = requiredDoc(docRaw);
-    const cliente = await this.prisma.cliente.findFirst({
+    let cliente = await this.prisma.cliente.findFirst({
       where: { doc },
       select: {
         id: true,
@@ -39,6 +57,23 @@ export class ClientesService {
         direccion: true,
       },
     });
+
+    // Fallback tolerant lookup: matches the same document with formatting differences
+    // (e.g. "1.044.210.426" vs "1044210426").
+    if (!cliente) {
+      const docKey = normalizeDocKey(doc);
+      if (docKey) {
+        const rows = await this.prisma.$queryRaw<ClienteRow[]>(Prisma.sql`
+          SELECT id, doc, nombre, email, telefono, direccion
+          FROM "Cliente"
+          WHERE regexp_replace(upper(doc), '[^A-Z0-9]', '', 'g') = ${docKey}
+          ORDER BY id ASC
+          LIMIT 1
+        `);
+        cliente = rows[0] ?? null;
+      }
+    }
+
     return { doc, cliente };
   }
 
@@ -128,6 +163,55 @@ export class ClientesService {
     };
   }
 
+  async listForUsuariosTab(qRaw?: string) {
+    const q = trimOptional(qRaw);
+    const where: Prisma.ClienteWhereInput = {};
+
+    if (q) {
+      where.OR = [
+        { doc: { contains: q, mode: 'insensitive' } },
+        { nombre: { contains: q, mode: 'insensitive' } },
+        { email: { contains: q, mode: 'insensitive' } },
+        { telefono: { contains: q, mode: 'insensitive' } },
+        { direccion: { contains: q, mode: 'insensitive' } },
+      ];
+    }
+
+    const clientes = await this.prisma.cliente.findMany({
+      where,
+      orderBy: [{ nombre: 'asc' }, { doc: 'asc' }],
+      select: {
+        id: true,
+        doc: true,
+        nombre: true,
+        email: true,
+        telefono: true,
+        direccion: true,
+      },
+    });
+
+    return {
+      items: clientes.map((cliente) => ({
+        id: cliente.id,
+        documento: cliente.doc,
+        doc: cliente.doc,
+        nombre: cliente.nombre,
+        name: cliente.nombre,
+        email: normalizeNullableText(cliente.email),
+        telefono: normalizeNullableText(cliente.telefono),
+        phone: normalizeNullableText(cliente.telefono),
+        direccion: normalizeNullableText(cliente.direccion),
+        address: normalizeNullableText(cliente.direccion),
+        rol: 'CLIENTE',
+        role: 'cliente',
+        activo: true,
+        is_active: true,
+        status: 'active',
+      })),
+      total: clientes.length,
+    };
+  }
+
   async upsert(dto: UpsertClienteDto) {
     const documento =
       trimOptional(dto.documento) ??
@@ -147,17 +231,7 @@ export class ClientesService {
     const email = trimOptional(dto.email) ?? trimOptional(dto.correo);
 
     const doc = requiredDoc(documento);
-    const existing = await this.prisma.cliente.findFirst({
-      where: { doc },
-      select: {
-        id: true,
-        doc: true,
-        nombre: true,
-        email: true,
-        telefono: true,
-        direccion: true,
-      },
-    });
+    const { cliente: existing } = await this.findClienteEntityByDoc(doc);
 
     const nombre = nombreInput ?? existing?.nombre;
     if (!nombre) {

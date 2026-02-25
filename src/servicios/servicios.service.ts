@@ -153,6 +153,14 @@ export class ServiciosService {
           }
         }
 
+        if (!cliente?.id) {
+          throw new AppError(
+            'CLIENTE_PERSISTENCE_ERROR',
+            'No se pudo guardar/obtener el cliente antes de crear el servicio.',
+            { clienteDoc: dto.clienteDoc, clienteNombre: dto.clienteNombre },
+            500,
+          );
+        }
         const t = await tx.tramite.create({
           data: {
             year,

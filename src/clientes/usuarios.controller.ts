@@ -1,17 +1,17 @@
 import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../common/guards/jwt.guard';
-import { UsersService } from './users.service';
+import { ClientesService } from './clientes.service';
 
-@ApiTags('Users')
+@ApiTags('Clientes')
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
-@Controller('users')
-export class UsersController {
-  constructor(private readonly service: UsersService) {}
+@Controller('usuarios')
+export class UsuariosController {
+  constructor(private readonly clientesService: ClientesService) {}
 
   @Get()
   async list(@Query('q') q?: string) {
-    return this.service.list(q);
+    return this.clientesService.listForUsuariosTab(q);
   }
 }
