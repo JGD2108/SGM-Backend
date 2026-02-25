@@ -167,6 +167,29 @@ export class TramitesService {
     return d;
   }
 
+  private getCuentaCobroExcludedConceptKeysByLegacyPayments(
+    payments: Array<{ tipo: any; valor: number; conceptoKey: string | null }>,
+  ): Set<string> {
+    const excluded = new Set<string>();
+
+    for (const p of payments) {
+      if (findCuentaCobroConcept(p.conceptoKey)) continue;
+      if (Number(p.valor ?? 0) <= 0) continue;
+
+      if (p.tipo === 'TIMBRE') {
+        excluded.add('IMPUESTO_TIMBRE');
+        continue;
+      }
+
+      if (p.tipo === 'DERECHOS') {
+        excluded.add('IMPUESTO_TRANSITO');
+        excluded.add('MATRICULA');
+      }
+    }
+
+    return excluded;
+  }
+
   private async getCuentaCobroTramiteOrThrow(id: string): Promise<CuentaCobroTramiteRecord> {
     const t = (await this.prisma.tramite.findUnique({
       where: { id },
@@ -218,6 +241,7 @@ export class TramitesService {
 
     const managedPayments = t.payments.filter((p) => !!findCuentaCobroConcept(p.conceptoKey));
     const legacyPayments = t.payments.filter((p) => !findCuentaCobroConcept(p.conceptoKey));
+    const excludedConceptKeysByLegacyPayments = this.getCuentaCobroExcludedConceptKeysByLegacyPayments(legacyPayments);
 
     const grouped = new Map<
       string,
@@ -266,7 +290,9 @@ export class TramitesService {
       grouped.set(def.key, acc);
     }
 
-    const conceptos = CUENTA_COBRO_CONCEPTS.map((def) => {
+    const conceptos = CUENTA_COBRO_CONCEPTS
+      .filter((def) => !excludedConceptKeysByLegacyPayments.has(def.key))
+      .map((def) => {
       const g = grouped.get(def.key);
       const amount_total = g?.amount_total ?? 0;
       const amount_4x1000 = g?.amount_4x1000 ?? 0;
@@ -1056,19 +1082,33 @@ export class TramitesService {
         concesionario: { select: { name: true } },
         ciudad: { select: { name: true } },
         cliente: { select: { nombre: true, doc: true } },
-        payments: { select: { id: true } },
+        payments: {
+          select: {
+            id: true,
+            tipo: true,
+            valor: true,
+            conceptoKey: true,
+          },
+        },
       },
     });
-    if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
+    if (!t) throw new AppError('NOT_FOUND', 'Tramite no existe.', { id }, 404);
     this.assertNotCanceled(t);
     this.assertNotFinalized(t);
 
     const payloadItems = dto.pagos ?? dto.conceptos ?? dto.items ?? [];
+    const excludedConceptKeysByLegacyPayments = this.getCuentaCobroExcludedConceptKeysByLegacyPayments(
+      t.payments.map((p) => ({
+        tipo: p.tipo,
+        valor: p.valor,
+        conceptoKey: p.conceptoKey,
+      })),
+    );
 
     if ((payloadItems?.length ?? 0) > CUENTA_COBRO_CONCEPTS.length) {
       throw new AppError(
         'VALIDATION_ERROR',
-        'La plantilla solo soporta un número limitado de conceptos.',
+        'La plantilla solo soporta un numero limitado de conceptos.',
         { maxConcepts: CUENTA_COBRO_CONCEPTS.length, received: payloadItems?.length ?? 0 },
         400,
       );
@@ -1082,10 +1122,10 @@ export class TramitesService {
       let def = explicitId ? findCuentaCobroConceptById(explicitId) : undefined;
       if (!def && explicitKey) def = findCuentaCobroConcept(explicitKey);
       if (explicitKey && !def) {
-        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inválido.', { concepto_key: explicitKey }, 400);
+        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro invalido.', { concepto_key: explicitKey }, 400);
       }
       if (explicitId && !def) {
-        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro inválido.', { conceptoId: explicitId }, 400);
+        throw new AppError('VALIDATION_ERROR', 'Concepto de cuenta de cobro invalido.', { conceptoId: explicitId }, 400);
       }
 
       if (!def) {
@@ -1096,7 +1136,7 @@ export class TramitesService {
         if (!def) {
           throw new AppError(
             'VALIDATION_ERROR',
-            'No hay más filas disponibles en la plantilla para conceptos.',
+            'No hay mas filas disponibles en la plantilla para conceptos.',
             { maxConcepts: CUENTA_COBRO_CONCEPTS.length },
             400,
           );
@@ -1117,7 +1157,7 @@ export class TramitesService {
       if (!Number.isFinite(amountTotal) || !Number.isFinite(amount4x1000)) {
         throw new AppError(
           'VALIDATION_ERROR',
-          'Montos inválidos en cuenta de cobro.',
+          'Montos invalidos en cuenta de cobro.',
           { conceptoId: explicitId ?? def.key, valor_total: amountTotalRaw, valor_4x1000: amount4x1000Raw },
           400,
         );
@@ -1145,20 +1185,61 @@ export class TramitesService {
       };
     });
 
+    const normalizedItemsToPersist = normalizedItems.filter(
+      (row) => !excludedConceptKeysByLegacyPayments.has(row.def.key),
+    );
+    const normalizedByKey = new Map(normalizedItemsToPersist.map((row) => [row.def.key, row] as const));
+
     const servicioNombre = resolveCuentaCobroServiceName(t.tipoServicio, (t as any).serviceData ?? undefined);
+    const managedConceptKeys = CUENTA_COBRO_CONCEPTS.map((c) => c.key);
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.payment.deleteMany({
+      const existingManagedRows = await tx.payment.findMany({
         where: {
           tramiteId: id,
-          conceptoKey: { not: null },
+          conceptoKey: { in: managedConceptKeys },
+        },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: {
+          id: true,
+          conceptoKey: true,
+          fecha: true,
+          medioPago: true,
         },
       });
 
-      for (const row of normalizedItems) {
-        const { item, def, amountTotal, amount4x1000, conceptNameRaw, observacionRaw } = row;
+      const existingByKey = new Map<string, typeof existingManagedRows>();
+      for (const row of existingManagedRows) {
+        const key = String(row.conceptoKey ?? '').trim().toUpperCase();
+        if (!key) continue;
+        const acc = existingByKey.get(key) ?? [];
+        acc.push(row);
+        existingByKey.set(key, acc);
+      }
+
+      for (const def of CUENTA_COBRO_CONCEPTS) {
+        const existingRows = existingByKey.get(def.key) ?? [];
+        const incoming = normalizedByKey.get(def.key);
+
+        if (!incoming) {
+          if (existingRows.length > 0) {
+            await tx.payment.deleteMany({
+              where: { id: { in: existingRows.map((r) => r.id) } },
+            });
+          }
+          continue;
+        }
+
+        const { item, amountTotal, amount4x1000, conceptNameRaw, observacionRaw } = incoming;
         const rowTotal = amountTotal + amount4x1000;
-        if (rowTotal <= 0) continue;
+        if (rowTotal <= 0) {
+          if (existingRows.length > 0) {
+            await tx.payment.deleteMany({
+              where: { id: { in: existingRows.map((r) => r.id) } },
+            });
+          }
+          continue;
+        }
 
         const defaultLabel = def.key === 'SERVICIO_PRINCIPAL' ? servicioNombre : def.label;
         const label = conceptNameRaw || defaultLabel;
@@ -1168,25 +1249,47 @@ export class TramitesService {
           const yearRaw = inputYear ?? t.year ?? new Date().getFullYear();
           const yearNum = Number(yearRaw);
           if (!Number.isFinite(yearNum) || yearNum < 2000) {
-            throw new AppError('VALIDATION_ERROR', 'Año inválido para cuenta de cobro.', { conceptoId: def.conceptoId, anio: yearRaw }, 400);
+            throw new AppError('VALIDATION_ERROR', 'Anio invalido para cuenta de cobro.', { conceptoId: def.conceptoId, anio: yearRaw }, 400);
           }
           anio = Math.trunc(yearNum);
+        }
+
+        const firstExisting = existingRows[0];
+        const fecha = item.fecha ? this.parseCuentaCobroFecha(item.fecha) : (firstExisting?.fecha ?? new Date());
+        const medioPago = (((item.medio_pago ?? firstExisting?.medioPago ?? 'OTRO') as MedioPago) ?? 'OTRO') as MedioPago;
+
+        const data = {
+          tipo: def.paymentTipo,
+          valor: rowTotal,
+          conceptoKey: def.key,
+          conceptoLabelSnapshot: label,
+          anio,
+          amountTotal,
+          amount4x1000,
+          fecha,
+          medioPago,
+          notes: observacionRaw || null,
+        };
+
+        if (firstExisting) {
+          await tx.payment.update({
+            where: { id: firstExisting.id },
+            data,
+          });
+
+          if (existingRows.length > 1) {
+            await tx.payment.deleteMany({
+              where: { id: { in: existingRows.slice(1).map((r) => r.id) } },
+            });
+          }
+          continue;
         }
 
         await tx.payment.create({
           data: {
             tramiteId: id,
-            tipo: def.paymentTipo,
-            valor: rowTotal,
-            conceptoKey: def.key,
-            conceptoLabelSnapshot: label,
-            anio,
-            amountTotal,
-            amount4x1000,
-            fecha: this.parseCuentaCobroFecha(item.fecha),
-            medioPago: ((item.medio_pago ?? 'OTRO') as MedioPago) ?? 'OTRO',
-            notes: observacionRaw || null,
             createdById: userId,
+            ...data,
           },
         });
       }
