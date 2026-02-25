@@ -107,6 +107,24 @@ export class ServiciosController {
     return this.tramitesService.saveCuentaCobroPagos(id, dto, req.user.id);
   }
 
+  @Put(':id/cuenta-cobro/conceptos')
+  async saveCuentaCobroConceptos(
+    @Param('id') id: string,
+    @Body() dto: SaveCuentaCobroPagosDto,
+    @Req() req: any,
+  ) {
+    return this.tramitesService.saveCuentaCobroPagos(id, dto, req.user.id);
+  }
+
+  @Post(':id/cuenta-cobro/conceptos')
+  async saveCuentaCobroConceptosPost(
+    @Param('id') id: string,
+    @Body() dto: SaveCuentaCobroPagosDto,
+    @Req() req: any,
+  ) {
+    return this.tramitesService.saveCuentaCobroPagos(id, dto, req.user.id);
+  }
+
   @Patch(':id/cuenta-cobro/base')
   async setCuentaCobroBase(@Param('id') id: string, @Body() dto: SetCuentaCobroBaseDto, @Req() req: any) {
     return this.tramitesService.setCuentaCobroBase(id, dto, req.user.id);

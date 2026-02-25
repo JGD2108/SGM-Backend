@@ -1108,8 +1108,8 @@ export class TramitesService {
       }
       assignedKeys.add(def.key);
 
-      const amountTotalRaw = (item as any).valor_total ?? item.amount_total;
-      const amount4x1000Raw = (item as any).valor_4x1000 ?? item.amount_4x1000;
+      const amountTotalRaw = (item as any).valor_total ?? item.amount_total ?? (item as any).total;
+      const amount4x1000Raw = (item as any).valor_4x1000 ?? item.amount_4x1000 ?? (item as any).valor4x1000;
       const amountTotalParsed = this.parseMoney(amountTotalRaw);
       const amount4x1000Parsed = this.parseMoney(amount4x1000Raw);
       const amountTotal = Math.max(0, Number((amountTotalParsed ?? 0)));
@@ -1131,7 +1131,7 @@ export class TramitesService {
         );
       }
 
-      const conceptNameCandidate = (item as any).concepto ?? (item as any).concept_name;
+      const conceptNameCandidate = (item as any).concepto ?? (item as any).concept_name ?? (item as any).nombre;
       const conceptNameRaw = typeof conceptNameCandidate === 'string' ? conceptNameCandidate.trim() : '';
       const observacionCandidate = (item as any).observacion ?? item.notes;
       const observacionRaw = typeof observacionCandidate === 'string' ? observacionCandidate.trim() : '';

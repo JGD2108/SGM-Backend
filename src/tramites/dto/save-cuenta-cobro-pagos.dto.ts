@@ -41,6 +41,12 @@ export class CuentaCobroPagoItemDto {
   @IsOptional()
   conceptoId?: string;
 
+  // Alias legacy frontend
+  @IsString()
+  @IsOptional()
+  @MaxLength(500)
+  nombre?: string;
+
   @IsString()
   @IsOptional()
   concept_name?: string;
@@ -61,6 +67,14 @@ export class CuentaCobroPagoItemDto {
   @IsOptional()
   amount_total?: number;
 
+  // Alias legacy frontend
+  @Transform(({ value }) => normalizeAmountOrZero(value))
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  total?: number;
+
   @Transform(({ value }) => normalizeAmountOrZero(value))
   @Type(() => Number)
   @IsInt()
@@ -74,6 +88,14 @@ export class CuentaCobroPagoItemDto {
   @Min(0)
   @IsOptional()
   amount_4x1000?: number;
+
+  // Alias legacy frontend
+  @Transform(({ value }) => normalizeAmountOrZero(value))
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  @IsOptional()
+  valor4x1000?: number;
 
   @Transform(({ value }) => normalizeAmountOrZero(value))
   @Type(() => Number)
