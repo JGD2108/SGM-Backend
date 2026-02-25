@@ -14,6 +14,7 @@ import { ShipmentsModule } from './shipments/shipments.module';
 import { PaymentsModule } from './payments/payments.module';
 import { ReportsModule } from './reports/reports.module';
 import { ServiciosModule } from './servicios/servicios.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -37,6 +38,7 @@ import { ServiciosModule } from './servicios/servicios.module';
     PaymentsModule,
     ReportsModule,
     ServiciosModule,
+    UsersModule,
   ],
   controllers: [HealthController],
   providers: [

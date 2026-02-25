@@ -118,6 +118,7 @@ case "${EXECUTION_MODE}" in
   auto)
     if docker_container_running; then
       run_in_docker "$@"
+      exit $?
     fi
     run_on_host "$@"
     ;;
