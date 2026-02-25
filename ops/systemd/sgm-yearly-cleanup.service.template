@@ -7,7 +7,9 @@ Wants=network-online.target
 Type=oneshot
 User=__RUN_USER__
 WorkingDirectory=__REPO_ROOT__
-ExecStart=/bin/bash __REPO_ROOT__/ops/run-yearly-cleanup.sh --execute
+Environment=CLEANUP_EXECUTION_MODE=docker
+Environment=CLEANUP_CONTAINER_NAME=sgm_api
+ExecStart=/bin/bash __REPO_ROOT__/ops/run-yearly-cleanup.sh
 Nice=10
 IOSchedulingClass=best-effort
 

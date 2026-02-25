@@ -6,11 +6,12 @@ const { PrismaClient } = require('@prisma/client');
 const { PrismaPg } = require('@prisma/adapter-pg');
 
 function parseArgs(argv) {
+  const envBeforeYear = Number(process.env.CLEANUP_BEFORE_YEAR ?? new Date().getFullYear());
   const args = {
     execute: false,
-    beforeYear: new Date().getFullYear(),
-    deleteOrphanClients: false,
-    summaryFile: '',
+    beforeYear: Number.isInteger(envBeforeYear) && envBeforeYear >= 2000 ? envBeforeYear : new Date().getFullYear(),
+    deleteOrphanClients: String(process.env.CLEANUP_DELETE_ORPHAN_CLIENTS ?? 'false').toLowerCase() === 'true',
+    summaryFile: String(process.env.CLEANUP_SUMMARY_FILE ?? '').trim(),
     help: false,
   };
 
