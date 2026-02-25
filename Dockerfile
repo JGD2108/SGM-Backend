@@ -16,6 +16,7 @@ FROM base AS build
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY package*.json ./
+COPY prisma.config.ts ./
 COPY nest-cli.json tsconfig*.json ./
 COPY prisma ./prisma
 COPY src ./src
@@ -35,6 +36,7 @@ ENV NODE_ENV=production
 ENV PORT=3000
 
 COPY package*.json ./
+COPY --from=build /app/prisma.config.ts ./prisma.config.ts
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY --from=build /app/prisma ./prisma
