@@ -332,8 +332,21 @@ export class ServiciosService {
     if (query.consecutivo) where.consecutivo = Number(query.consecutivo);
 
     if (query.ciudad) where.ciudad = { is: { name: String(query.ciudad) } };
-    if (query.clienteDoc) where.cliente = { is: { doc: String(query.clienteDoc) } };
 
+    const clienteDocQuery = trimOptionalText(query.clienteDoc ?? query.cliente_doc);
+    if (clienteDocQuery) {
+      const clienteDocKey = normalizeClienteDocKey(clienteDocQuery);
+      if (clienteDocKey) {
+        const clienteMatches = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT id
+          FROM "Cliente"
+          WHERE regexp_replace(upper(doc), '[^A-Z0-9]', '', 'g') = ${clienteDocKey}
+        `);
+        where.clienteId = { in: clienteMatches.map((row) => row.id) };
+      } else {
+        where.clienteId = { in: [] };
+      }
+    }
     const [total, items] = await this.prisma.$transaction([
       this.prisma.tramite.count({ where }),
       this.prisma.tramite.findMany({

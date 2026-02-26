@@ -901,8 +901,21 @@ export class TramitesService {
     if (query.estado) where.estadoActual = query.estado as TramiteEstado;
 
     if (query.ciudad) where.ciudad = { is: { name: String(query.ciudad) } };
-    if (query.clienteDoc) where.cliente = { is: { doc: String(query.clienteDoc) } };
 
+    const clienteDocQuery = trimOptionalText(query.clienteDoc ?? query.cliente_doc);
+    if (clienteDocQuery) {
+      const clienteDocKey = normalizeClienteDocKey(clienteDocQuery);
+      if (clienteDocKey) {
+        const clienteMatches = await this.prisma.$queryRaw<Array<{ id: string }>>(Prisma.sql`
+          SELECT id
+          FROM "Cliente"
+          WHERE regexp_replace(upper(doc), '[^A-Z0-9]', '', 'g') = ${clienteDocKey}
+        `);
+        where.clienteId = { in: clienteMatches.map((row) => row.id) };
+      } else {
+        where.clienteId = { in: [] };
+      }
+    }
     if (query.createdFrom || query.createdTo) {
       where.createdAt = {};
       if (query.createdFrom) (where.createdAt as any).gte = new Date(`${query.createdFrom}T00:00:00.000Z`);
