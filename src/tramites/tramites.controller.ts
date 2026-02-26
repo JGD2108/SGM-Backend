@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   Param,
   Patch,
@@ -117,6 +118,11 @@ export class TramitesController {
   @Patch(':id')
   async patch(@Param('id') id: string, @Body() dto: PatchTramiteDto, @Req() req: any) {
     return this.service.patch(id, dto, req.user.id);
+  }
+
+  @Delete(':id')
+  async remove(@Param('id') id: string, @Req() req: any) {
+    return this.service.remove(id, req.user.id);
   }
 
   @Get(':id/estados/historial')

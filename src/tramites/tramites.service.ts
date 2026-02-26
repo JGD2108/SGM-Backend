@@ -1726,6 +1726,58 @@ export class TramitesService {
     return this.getById(id);
   }
 
+  async remove(id: string, userId: string) {
+    if (!userId) throw new AppError('UNAUTHORIZED', 'No autenticado.', {}, 401);
+
+    const t = await this.prisma.tramite.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        tipoServicio: true,
+        files: { select: { storagePath: true } },
+        shipmentLinks: { select: { shipmentId: true } },
+      },
+    });
+    if (!t) throw new AppError('NOT_FOUND', 'Tramite no existe.', { id }, 404);
+    this.assertIsMatricula(t);
+
+    const filePaths = t.files.map((f) => f.storagePath).filter((p): p is string => !!p);
+    const shipmentIds = [...new Set(t.shipmentLinks.map((l) => l.shipmentId))];
+
+    const txResult = await this.prisma.$transaction(async (tx) => {
+      const reservas = await tx.consecutivoReserva.updateMany({
+        where: { tramiteId: id },
+        data: { status: 'LIBERADO', releasedAt: new Date(), tramiteId: null },
+      });
+
+      await tx.tramite.delete({ where: { id } });
+
+      const orphanShipments = shipmentIds.length
+        ? await tx.shipment.deleteMany({
+            where: {
+              id: { in: shipmentIds },
+              links: { none: {} },
+            },
+          })
+        : { count: 0 };
+
+      return {
+        reservasLiberadas: reservas.count,
+        enviosHuerfanosEliminados: orphanShipments.count,
+      };
+    });
+
+    await Promise.allSettled(filePaths.map((storagePath) => this.storage.deleteFileIfExists(storagePath)));
+
+    return {
+      ok: true,
+      id,
+      reservas_liberadas: txResult.reservasLiberadas,
+      archivos_eliminados: filePaths.length,
+      envios_huerfanos_eliminados: txResult.enviosHuerfanosEliminados,
+    };
+  }
+
   async reabrir(id: string, reason: string, toEstado: TramiteEstado | undefined, userId: string) {
     const t = await this.prisma.tramite.findUnique({ where: { id } });
     if (!t) throw new AppError('NOT_FOUND', 'Trámite no existe.', { id }, 404);
