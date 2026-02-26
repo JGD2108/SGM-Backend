@@ -17,6 +17,8 @@
     "start:prod": "node dist/src/main",
     "ops:cleanup:yearly:dry-run": "node ops/yearly-cleanup.js --dry-run",
     "ops:cleanup:yearly": "node ops/yearly-cleanup.js --execute",
+    "ops:clientes:dedupe:dry-run": "node ops/dedupe-clientes.js --dry-run",
+    "ops:clientes:dedupe": "node ops/dedupe-clientes.js --execute",
     "lint": "eslint \"{src,apps,libs,test}/**/*.ts\" --fix",
     "test": "jest",
     "test:watch": "jest --watch",
