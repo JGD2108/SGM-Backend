@@ -4,6 +4,9 @@ import { AppError } from '../common/errors/app-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpsertClienteDto } from './dto/upsert-cliente.dto';
 
+const SPANISH_UPPER_ACCENTS = 'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ';
+const ASCII_UPPER_EQUIVALENTS = 'AAAAAEEEEIIIIOOOOOUUUUNC';
+
 function normalizeNullableText(value: string | null | undefined) {
   const s = String(value ?? '').trim();
   return s.length > 0 ? s : null;
@@ -31,6 +34,16 @@ function normalizeDocKey(value: string | undefined): string | null {
   return s.length > 0 ? s : null;
 }
 
+function normalizeNameKey(value: string | undefined): string | null {
+  const s = String(value ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  return s.length > 0 ? s : null;
+}
+
 type ClienteRow = {
   id: string;
   doc: string;
@@ -43,6 +56,27 @@ type ClienteRow = {
 @Injectable()
 export class ClientesService {
   constructor(private readonly prisma: PrismaService) {}
+
+  private async findClientesByNormalizedName(nombreRaw: string) {
+    const nombre = trimOptional(nombreRaw);
+    if (!nombre) return [] as ClienteRow[];
+
+    const nameKey = normalizeNameKey(nombre);
+    if (!nameKey) return [] as ClienteRow[];
+
+    return this.prisma.$queryRaw<ClienteRow[]>(Prisma.sql`
+      SELECT id, doc, nombre, email, telefono, direccion
+      FROM "Cliente"
+      WHERE regexp_replace(
+        translate(upper(nombre), ${SPANISH_UPPER_ACCENTS}, ${ASCII_UPPER_EQUIVALENTS}),
+        '[^A-Z0-9]',
+        '',
+        'g'
+      ) = ${nameKey}
+      ORDER BY CASE WHEN btrim(doc) = '' THEN 1 ELSE 0 END, id ASC
+      LIMIT 2
+    `);
+  }
 
   private async findClienteEntityByDoc(docRaw: string) {
     const doc = requiredDoc(docRaw);
@@ -230,24 +264,42 @@ export class ClientesService {
     const direccion = trimOptional(dto.direccion) ?? trimOptional(dto.address);
     const email = trimOptional(dto.email) ?? trimOptional(dto.correo);
 
-    const doc = requiredDoc(documento);
-    const { cliente: existing } = await this.findClienteEntityByDoc(doc);
+    let existing: ClienteRow | null = null;
+    if (documento) {
+      ({ cliente: existing } = await this.findClienteEntityByDoc(documento));
+    }
 
     const nombre = nombreInput ?? existing?.nombre;
     if (!nombre) {
       throw new AppError(
         'VALIDATION_ERROR',
         'Nombre del cliente es requerido.',
-        { documento: doc },
+        { documento: documento ?? null },
         400,
       );
     }
+
+    if (!existing && !documento) {
+      const byName = await this.findClientesByNormalizedName(nombre);
+      if (byName.length > 1) {
+        throw new AppError(
+          'CLIENTE_AMBIGUOUS_MATCH',
+          'Hay varios clientes con ese nombre. Ingresa cédula/NIT para identificar correctamente.',
+          { nombre },
+          409,
+        );
+      }
+      existing = byName[0] ?? null;
+    }
+
+    const doc = documento ?? existing?.doc ?? '';
 
     const saved = existing
       ? await this.prisma.cliente.update({
           where: { id: existing.id },
           data: {
             nombre,
+            ...(documento && existing.doc !== documento ? { doc: documento } : {}),
             email: email ?? existing.email,
             telefono: telefono ?? existing.telefono,
             direccion: direccion ?? existing.direccion,

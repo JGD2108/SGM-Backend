@@ -17,8 +17,11 @@ export class CreateTramiteDto {
   @IsString() @IsNotEmpty()
   clienteNombre: string;
 
-  @IsString() @IsNotEmpty()
-  clienteDoc: string;
+  @Transform(({ value }) => optionalTrimmedString(value))
+  @IsOptional()
+  @IsString()
+  @MaxLength(40)
+  clienteDoc?: string;
 
   @Transform(({ value }) => optionalTrimmedString(value))
   @IsOptional()

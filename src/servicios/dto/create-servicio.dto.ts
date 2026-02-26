@@ -25,10 +25,12 @@ export class CreateServicioDto {
   @MaxLength(140)
   clienteNombre!: string;
 
-  @ApiProperty({ example: '123456789' })
+  @ApiPropertyOptional({ example: '123456789', description: 'Cédula/NIT (opcional si no se tiene).' })
+  @Transform(({ value }) => optionalTrimmedString(value))
+  @IsOptional()
   @IsString()
   @MaxLength(40)
-  clienteDoc!: string;
+  clienteDoc?: string;
 
   @ApiPropertyOptional({ example: 'cliente@correo.com' })
   @Transform(({ value }) => optionalTrimmedString(value))

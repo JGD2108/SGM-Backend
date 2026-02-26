@@ -20,6 +20,42 @@ function findSmallestMissing(sortedUsed: number[]): number {
   return expected;
 }
 
+const CLIENTE_MATCH_SPANISH_UPPER_ACCENTS = 'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ';
+const CLIENTE_MATCH_ASCII_UPPER_EQUIVALENTS = 'AAAAAEEEEIIIIOOOOOUUUUNC';
+
+type ClienteMatchRow = {
+  id: string;
+  doc: string;
+  nombre: string;
+  email: string | null;
+  telefono: string | null;
+  direccion: string | null;
+};
+
+function trimOptionalText(value: unknown): string | undefined {
+  if (value === undefined || value === null) return undefined;
+  const s = String(value).trim();
+  return s.length > 0 ? s : undefined;
+}
+
+function normalizeClienteDocKey(value: string | undefined): string | null {
+  const s = String(value ?? '')
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  return s.length > 0 ? s : null;
+}
+
+function normalizeClienteNameKey(value: string | undefined): string | null {
+  const s = String(value ?? '')
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toUpperCase()
+    .replace(/[^A-Z0-9]/g, '');
+  return s.length > 0 ? s : null;
+}
+
 @Injectable()
 export class ServiciosService {
   constructor(private readonly prisma: PrismaService) {}
@@ -129,13 +165,59 @@ export class ServiciosService {
           ...(dto.clienteTelefono !== undefined ? { telefono: dto.clienteTelefono } : {}),
           ...(dto.clienteDireccion !== undefined ? { direccion: dto.clienteDireccion } : {}),
         };
+        const clienteDoc = trimOptionalText(dto.clienteDoc);
 
-        // cliente
-        let cliente = await tx.cliente.findFirst({ where: { doc: dto.clienteDoc } });
+        // cliente: documento primero (normalizado), nombre solo si no hay documento
+        let cliente: ClienteMatchRow | null = null;
+        if (clienteDoc) {
+          cliente = await tx.cliente.findFirst({ where: { doc: clienteDoc } });
+
+          if (!cliente) {
+            const docKey = normalizeClienteDocKey(clienteDoc);
+            if (docKey) {
+              const rows = await tx.$queryRaw<ClienteMatchRow[]>(Prisma.sql`
+                SELECT id, doc, nombre, email, telefono, direccion
+                FROM "Cliente"
+                WHERE regexp_replace(upper(doc), '[^A-Z0-9]', '', 'g') = ${docKey}
+                ORDER BY id ASC
+                LIMIT 1
+              `);
+              cliente = rows[0] ?? null;
+            }
+          }
+        } else {
+          const nameKey = normalizeClienteNameKey(dto.clienteNombre);
+          if (nameKey) {
+            const rows = await tx.$queryRaw<ClienteMatchRow[]>(Prisma.sql`
+              SELECT id, doc, nombre, email, telefono, direccion
+              FROM "Cliente"
+              WHERE regexp_replace(
+                translate(upper(nombre), ${CLIENTE_MATCH_SPANISH_UPPER_ACCENTS}, ${CLIENTE_MATCH_ASCII_UPPER_EQUIVALENTS}),
+                '[^A-Z0-9]',
+                '',
+                'g'
+              ) = ${nameKey}
+              ORDER BY CASE WHEN btrim(doc) = '' THEN 1 ELSE 0 END, id ASC
+              LIMIT 2
+            `);
+
+            if (rows.length > 1) {
+              throw new AppError(
+                'CLIENTE_AMBIGUOUS_MATCH',
+                'Hay varios clientes con ese nombre. Ingresa cédula/NIT para identificar correctamente.',
+                { nombre: dto.clienteNombre },
+                409,
+              );
+            }
+
+            cliente = rows[0] ?? null;
+          }
+        }
+
         if (!cliente) {
           cliente = await tx.cliente.create({
             data: {
-              doc: dto.clienteDoc,
+              doc: clienteDoc ?? '',
               nombre: dto.clienteNombre,
               ...clienteContactData,
             },
@@ -143,6 +225,7 @@ export class ServiciosService {
         } else {
           const clienteUpdateData = {
             ...(cliente.nombre !== dto.clienteNombre ? { nombre: dto.clienteNombre } : {}),
+            ...(clienteDoc && cliente.doc !== clienteDoc ? { doc: clienteDoc } : {}),
             ...clienteContactData,
           };
           if (Object.keys(clienteUpdateData).length > 0) {
@@ -157,7 +240,7 @@ export class ServiciosService {
           throw new AppError(
             'CLIENTE_PERSISTENCE_ERROR',
             'No se pudo guardar/obtener el cliente antes de crear el servicio.',
-            { clienteDoc: dto.clienteDoc, clienteNombre: dto.clienteNombre },
+            { clienteDoc: clienteDoc ?? null, clienteNombre: dto.clienteNombre },
             500,
           );
         }
