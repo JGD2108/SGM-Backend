@@ -3,6 +3,7 @@ import { Prisma } from '@prisma/client';
 import { AppError } from '../common/errors/app-error';
 import { PrismaService } from '../prisma/prisma.service';
 import { UpsertClienteDto } from './dto/upsert-cliente.dto';
+import { UpdateUsuarioDto } from './dto/update-usuario.dto';
 
 const SPANISH_UPPER_ACCENTS = 'ÁÀÄÂÃÉÈËÊÍÌÏÎÓÒÖÔÕÚÙÜÛÑÇ';
 const ASCII_UPPER_EQUIVALENTS = 'AAAAAEEEEIIIIOOOOOUUUUNC';
@@ -42,6 +43,10 @@ function normalizeNameKey(value: string | undefined): string | null {
     .toUpperCase()
     .replace(/[^A-Z0-9]/g, '');
   return s.length > 0 ? s : null;
+}
+
+function hasOwnProp<T extends object>(obj: T, key: string) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
 }
 
 type ClienteRow = {
@@ -127,6 +132,33 @@ export class ClientesService {
       email: normalizeNullableText(cliente.email),
       telefono: normalizeNullableText(cliente.telefono),
       direccion: normalizeNullableText(cliente.direccion),
+    };
+  }
+
+  private toUsuarioTabItem(cliente: {
+    id: string;
+    doc: string;
+    nombre: string;
+    email: string | null;
+    telefono: string | null;
+    direccion: string | null;
+  }) {
+    return {
+      id: cliente.id,
+      documento: cliente.doc,
+      doc: cliente.doc,
+      nombre: cliente.nombre,
+      name: cliente.nombre,
+      email: normalizeNullableText(cliente.email),
+      telefono: normalizeNullableText(cliente.telefono),
+      phone: normalizeNullableText(cliente.telefono),
+      direccion: normalizeNullableText(cliente.direccion),
+      address: normalizeNullableText(cliente.direccion),
+      rol: 'CLIENTE',
+      role: 'cliente',
+      activo: true,
+      is_active: true,
+      status: 'active',
     };
   }
 
@@ -225,24 +257,171 @@ export class ClientesService {
     });
 
     return {
-      items: clientes.map((cliente) => ({
-        id: cliente.id,
-        documento: cliente.doc,
-        doc: cliente.doc,
-        nombre: cliente.nombre,
-        name: cliente.nombre,
-        email: normalizeNullableText(cliente.email),
-        telefono: normalizeNullableText(cliente.telefono),
-        phone: normalizeNullableText(cliente.telefono),
-        direccion: normalizeNullableText(cliente.direccion),
-        address: normalizeNullableText(cliente.direccion),
-        rol: 'CLIENTE',
-        role: 'cliente',
-        activo: true,
-        is_active: true,
-        status: 'active',
-      })),
+      items: clientes.map((cliente) => this.toUsuarioTabItem(cliente)),
       total: clientes.length,
+    };
+  }
+
+  async updateUsuarioById(id: string, dto: UpdateUsuarioDto) {
+    const existing = await this.prisma.cliente.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        doc: true,
+        nombre: true,
+        email: true,
+        telefono: true,
+        direccion: true,
+      },
+    });
+
+    if (!existing) {
+      throw new AppError('NOT_FOUND', 'Usuario/cliente no existe.', { id }, 404);
+    }
+
+    const nombreProvided = hasOwnProp(dto, 'nombre') || hasOwnProp(dto, 'name');
+    const documentoProvided = hasOwnProp(dto, 'documento') || hasOwnProp(dto, 'doc');
+    const emailProvided = hasOwnProp(dto, 'email');
+    const telefonoProvided = hasOwnProp(dto, 'telefono') || hasOwnProp(dto, 'phone');
+    const direccionProvided = hasOwnProp(dto, 'direccion') || hasOwnProp(dto, 'address');
+    const activoProvided = hasOwnProp(dto, 'activo') || hasOwnProp(dto, 'is_active');
+    const rolProvided = hasOwnProp(dto, 'rol') || hasOwnProp(dto, 'role');
+
+    const nombreInput = hasOwnProp(dto, 'nombre') ? dto.nombre : dto.name;
+    const documentoInput = hasOwnProp(dto, 'documento') ? dto.documento : dto.doc;
+    const telefonoInput = hasOwnProp(dto, 'telefono') ? dto.telefono : dto.phone;
+    const direccionInput = hasOwnProp(dto, 'direccion') ? dto.direccion : dto.address;
+    const activoInput = hasOwnProp(dto, 'activo') ? dto.activo : dto.is_active;
+
+    const requestedFieldCount = [
+      nombreProvided,
+      documentoProvided,
+      emailProvided,
+      telefonoProvided,
+      direccionProvided,
+      activoProvided,
+      rolProvided,
+    ].filter(Boolean).length;
+
+    if (activoInput === false) {
+      throw new AppError(
+        'SOFT_DELETE_UNSUPPORTED',
+        'Inactivar ya no está soportado. Usa DELETE /usuarios/:id para eliminar.',
+        { id },
+        409,
+      );
+    }
+
+    const data: Prisma.ClienteUpdateInput = {};
+
+    if (nombreProvided) {
+      if (nombreInput === null) {
+        throw new AppError('VALIDATION_ERROR', 'Nombre no puede quedar vacío.', { id }, 400);
+      }
+      if (nombreInput !== undefined && nombreInput !== existing.nombre) {
+        data.nombre = nombreInput;
+      }
+    }
+
+    if (documentoProvided) {
+      const nextDoc = documentoInput ?? '';
+      if (nextDoc) {
+        const { cliente: byDoc } = await this.findClienteEntityByDoc(nextDoc);
+        if (byDoc && byDoc.id !== existing.id) {
+          throw new AppError(
+            'CLIENTE_DOC_CONFLICT',
+            'Ya existe otro cliente con ese documento.',
+            { id, documento: nextDoc, existingClienteId: byDoc.id },
+            409,
+          );
+        }
+      }
+      if (nextDoc !== existing.doc) {
+        data.doc = nextDoc;
+      }
+    }
+
+    if (emailProvided) {
+      const nextEmail = dto.email ?? null;
+      if ((existing.email ?? null) !== nextEmail) {
+        data.email = nextEmail;
+      }
+    }
+
+    if (telefonoProvided) {
+      const nextTelefono = telefonoInput ?? null;
+      if ((existing.telefono ?? null) !== nextTelefono) {
+        data.telefono = nextTelefono;
+      }
+    }
+
+    if (direccionProvided) {
+      const nextDireccion = direccionInput ?? null;
+      if ((existing.direccion ?? null) !== nextDireccion) {
+        data.direccion = nextDireccion;
+      }
+    }
+
+    // `rol` and `activo=true` are accepted for frontend compatibility but are not persisted on Cliente.
+    if (Object.keys(data).length === 0) {
+      return this.toUsuarioTabItem(existing);
+    }
+
+    const saved = await this.prisma.cliente.update({
+      where: { id },
+      data,
+      select: {
+        id: true,
+        doc: true,
+        nombre: true,
+        email: true,
+        telefono: true,
+        direccion: true,
+      },
+    });
+
+    return this.toUsuarioTabItem(saved);
+  }
+
+  async deleteUsuarioById(id: string) {
+    const existing = await this.prisma.cliente.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        doc: true,
+        nombre: true,
+        email: true,
+        telefono: true,
+        direccion: true,
+        _count: {
+          select: {
+            tramites: true,
+          },
+        },
+      },
+    });
+
+    if (!existing) {
+      throw new AppError('NOT_FOUND', 'Usuario/cliente no existe.', { id }, 404);
+    }
+
+    if (existing._count.tramites > 0) {
+      throw new AppError(
+        'CLIENTE_HAS_TRAMITES',
+        'No se puede eliminar un cliente con trámites asociados.',
+        { id, tramites: existing._count.tramites },
+        409,
+      );
+    }
+
+    await this.prisma.cliente.delete({ where: { id } });
+
+    return {
+      ok: true,
+      deleted: true,
+      mode: 'hard_delete',
+      id: existing.id,
+      usuario: this.toUsuarioTabItem(existing),
     };
   }
 
